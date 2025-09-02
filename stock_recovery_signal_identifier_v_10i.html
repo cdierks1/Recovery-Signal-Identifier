@@ -49,7 +49,7 @@ details .body{padding:12px;border-top:1px solid var(--grid)}
 canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:12px}
 /* HUD + tooltip */
 .hud{position:absolute;top:10px;left:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none}
-.tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0}
+.tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0;z-index:2000}
 /* help */
 .help{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--ink);border-radius:50%;font-size:11px;cursor:help;position:relative}
 .help:hover::after{content:attr(data-tip);position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;min-width:200px;max-width:320px;white-space:normal}
@@ -824,13 +824,21 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       let moved=false; for(let i=xa;i<=xb;i++){ const y=this._rebasedVal(i,xa); if(!Number.isFinite(y)) continue; const px=this.x2px(i), py=this.y2px(y); if(!moved){ctx.moveTo(px,py); moved=true;} else ctx.lineTo(px,py); }
       ctx.stroke();
 
-      // dots (store px/py for hit-testing) – use rebased y
+      // dots (store px/py for hit-testing) – use correct y positioning
       for(const d of this.dots){
         if(d.idx<xa||d.idx>xb){ d.px=null; d.py=null; continue; }
-        d.px=this.x2px(d.idx); d.py=this.y2px(this._rebasedVal(d.idx,xa));
+        d.px=this.x2px(d.idx);
+        // For equity chart, use the equity value (already in the correct scale)
+        const yVal = this.series ? this.series.value(d.idx) : 0;
+        d.py=this.y2px(yVal);
+
         ctx.beginPath(); ctx.arc(d.px,d.py,4,0,Math.PI*2);
         ctx.fillStyle = d.role==="entry" ? COL.red : COL.green;
         ctx.fill();
+        // Add a border for visibility
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
       // highlight hovered dot + its pair
       if(this.hoverDot){
@@ -923,7 +931,10 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
               ? `<strong>${entryDate}</strong> - (${exitDate})`
               : `(${entryDate}) - <strong>${exitDate}</strong>`;
 
-          tip.style.opacity=1; tip.style.left = (dot.px)+"px"; tip.style.top  = (dot.py)+"px";
+          tip.style.opacity=1;
+          // Ensure main chart uses CSS transform positioning
+          tip.style.transform = "translate(-50%, -120%)";
+          tip.style.left = (dot.px)+"px"; tip.style.top  = (dot.py)+"px";
           tip.innerHTML =
             `<div><strong>Dates:</strong> ${datesRow}</div>`+
             `<div><strong>Trigger:</strong> ${sig.triggerClose.toFixed(2)}</div>`+
@@ -936,6 +947,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       }
       // non-dot tooltip
       tip.style.opacity=1;
+      // Ensure main chart uses CSS transform positioning
+      tip.style.transform = "translate(-50%, -120%)";
       if(chart.pointer){ tip.style.left=chart.pointer.x+"px"; tip.style.top=chart.pointer.y+"px"; }
       tip.innerHTML = (relOn ? ("Rel: "+(displayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2))) +
                       (sma && sma[i]!=null ? " • SMA: "+(relOn?(((1+sma[i])/(1+(rel[chart.visibleRange()[0]]||0))-1)*100).toFixed(2)+"%":sma[i].toFixed(2)) : "") +
@@ -1036,11 +1049,94 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     eqChart.setRelative(true);
     const chartBase = Math.max(base, 0.0001);
     eqChart.setData({ length:eq.length, date:i=>eq[i].date, value:i=>(eq[i].equity/chartBase - 1), aux:null });
-    eqChart.setDots([]);
+
+    // Add dots for trades executed in backtest
+    const tradeDots = [];
+    for(const trade of trades) {
+      // Only add dots if the trade indices are within the equity data range
+      if(trade.triggerIndex < eq.length && trade.endIndex < eq.length) {
+        tradeDots.push({idx: trade.triggerIndex, role: "entry", pairIdx: trade.endIndex});
+        tradeDots.push({idx: trade.endIndex, role: "exit", pairIdx: trade.triggerIndex});
+      }
+    }
+    eqChart.setDots(tradeDots);
     eqChart.onhover=(evt)=>{
-      const i = evt && evt.i;
-      const hud=$("#equityHud"); if(i==null){ hud.style.display="none"; return; }
-      const r=eq[i].equity/chartBase - 1; hud.style.display="block"; hud.innerHTML=toISO(eq[i].date)+" • "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
+      const {i, dot} = evt || {};
+
+      const hud=$("#equityHud"), tip=$("#tip");
+
+      // Show HUD if we have a valid index
+      if(i !== null && eq[i]){
+        const r=eq[i].equity/chartBase - 1;
+        hud.style.display="block";
+        hud.innerHTML=toISO(eq[i].date)+" • "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
+      } else {
+        hud.style.display="none";
+      }
+
+      // Show trade info on dot hover
+      if(dot){
+        const trade = dot.role==="entry"
+          ? trades.find(t=>t.triggerIndex===dot.idx)
+          : trades.find(t=>t.endIndex===dot.idx);
+        if(trade){
+          const bars = Math.max(0, trade.endIndex - trade.triggerIndex);
+          const entryDate = toISO(trade.triggerDate);
+          const exitDate  = toISO(trade.endDate);
+
+          const datesRow = dot.role==="entry"
+            ? `<strong>${entryDate}</strong> - (${exitDate})`
+            : `(${entryDate}) - <strong>${exitDate}</strong>`;
+
+          // Cross-highlight the main chart
+          const mainDot = chart.dots.find(d => d.idx === dot.idx);
+          if(mainDot){
+            chart.hoverDot = mainDot;
+            chart.render(); // Force main chart to redraw with highlighting
+          }
+
+          tip.style.opacity=1;
+          // For equity chart only: disable default CSS translate so we control exact position
+          tip.style.transform = "none";
+          // Position tooltip relative to the equity chart canvas, close to the dot
+          const canvas = $("#equityChart");
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = (rect.left + dot.px - 24) + "px"; // ~24px to the left of dot
+          tip.style.top  = (rect.top + dot.py - 8) + "px";   // ~8px above
+          tip.innerHTML =
+            `<div><strong>Dates:</strong> ${datesRow}</div>`+
+            `<div><strong>Entry:</strong> ${trade.triggerClose.toFixed(2)}</div>`+
+            `<div><strong>Exit:</strong> ${trade.endClose.toFixed(2)} (${bars} bars)</div>`+
+            `<div><strong>Return:</strong> <span style="color:${trade.fwdRet>=0?COL.green:COL.red}">${fmtPct(trade.fwdRet)}</span></div>`+
+            `<div><strong>Type:</strong> ${trade.kind}</div>`+
+            `<div><strong>EType:</strong> ${trade.exitType||"horizon"}</div>`;
+          return;
+        }
+      }
+
+      // Clear main chart highlighting when not hovering over equity chart dots
+      if(!dot){
+        chart.hoverDot = null;
+        chart.render(); // Clear highlighting in main chart
+      }
+
+      // Non-dot tooltip (only show if we have a valid index)
+      if(i !== null && eq[i]){
+        const r=eq[i].equity/chartBase - 1;
+        tip.style.opacity=1;
+        if(eqChart.pointer){
+          // For equity chart only: disable default CSS translate so we control exact position
+          tip.style.transform = "none";
+          // Position tooltip relative to the equity chart canvas, close to cursor
+          const canvas = $("#equityChart");
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = (rect.left + eqChart.pointer.x - 20) + "px"; // ~20px to the left of cursor
+          tip.style.top  = (rect.top + eqChart.pointer.y - 8) + "px";   // ~8px above
+        }
+        tip.innerHTML = "Equity: "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
+      } else {
+        tip.style.opacity=0;
+      }
     };
   }
 
