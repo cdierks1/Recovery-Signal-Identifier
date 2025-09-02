@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stock Recovery Signal Identifier — v10.5</title>
+<title>Stock Recovery Signal Identifier — v10.6</title>
 <style>
 :root{
   --bg:#0b0f14; --panel:#121821; --ink:#e6eef7; --muted:#9fb3c8; --accent:#4da3ff;
@@ -216,7 +216,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
       <div class="row" style="justify-content:space-between"><strong>Signals</strong><span id="sigSummary" class="muted">—</span></div>
       <table>
         <thead>
-          <tr><th>Trigger Date</th><th>Trigger</th><th id="thH">+H/Exit</th><th>Return</th><th>Cliff?</th><th>Type</th></tr>
+          <tr><th>Trigger Date</th><th>Trigger</th><th id="thH">+H/Exit</th><th>Return</th><th>Type</th><th>EType</th></tr>
         </thead>
         <tbody id="sigTable"></tbody>
       </table>
@@ -811,7 +811,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
           return;
         }
       }
-      // non-dot tooltip (unchanged minimal)
+      // non-dot tooltip
       tip.style.opacity=1;
       if(chart.pointer){ tip.style.left=chart.pointer.x+"px"; tip.style.top=chart.pointer.y+"px"; }
       tip.innerHTML = (relOn ? ("Rel: "+(displayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2))) +
@@ -857,8 +857,8 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         "<td>"+fmt(s.triggerClose)+"</td>"+
         "<td>"+toISO(s.endDate)+"</td>"+
         "<td>"+fmtPctCol(s.fwdRet)+"</td>"+
-        "<td>"+(s.cliff?"Yes":"")+"</td>"+
         "<td>"+s.kind+"</td>"+
+        "<td>"+(s.exitType||"horizon")+"</td>"+
       "</tr>"
     ).join("") : '<tr><td colspan="6" class="muted">No signals.</td></tr>';
   }
