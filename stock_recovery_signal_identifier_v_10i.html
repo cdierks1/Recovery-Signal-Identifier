@@ -113,7 +113,6 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         </div>
         <div class="row" style="margin-top:8px">
           <input id="instrFile" type="file" accept="application/json" />
-          <button id="loadInstr">Load instruments</button>
         </div>
         <div id="instrStatus" class="muted" style="margin-top:6px">No file loaded. Expected key: <code>instruments</code>.</div>
       </div>
@@ -636,48 +635,27 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         }
       }
     } else {
-      // Non-sequential portfolio: invest equally across all ACTIVE trades each day.
-      // Track portfolio units so we compound correctly across days without jumps.
-      let portfolioValue = 1;      // start with 1 unit of portfolio value
-      let portfolioUnits = 1;      // units representing current portfolio shares
-      let lastPricePerUnit = 1;    // portfolioValue / portfolioUnits
+      // Non-sequential portfolio: invest equally across trades that span (i-1, i]
+      let portfolioValue = 1;
+      for (let i = 0; i < rows.length; i++){
+        // day 0: no prior bar
+        if (i === 0){ eq.push({date: rows[i].date, equity: portfolioValue}); continue; }
 
-      for(let i=0;i<rows.length;i++){
-        // Determine which trades are active on day i
-        const activeIdx=[];
-        for(let t=0;t<trades.length;t++){
-          const tr=trades[t];
-          if(tr.triggerIndex<rows.length && tr.endIndex<rows.length && i>=tr.triggerIndex && i<=tr.endIndex){
-            activeIdx.push(t);
-          }
+        const activeIdx = [];
+        for (let t = 0; t < trades.length; t++){
+          const tr = trades[t];
+          // must have been open yesterday and still open today
+          if (tr.triggerIndex < i && i <= tr.endIndex) activeIdx.push(t);
         }
 
-        if(activeIdx.length===0){
-          // No exposure: portfolio stays flat
-          eq.push({date:rows[i].date, equity:portfolioValue});
+        if (activeIdx.length === 0){
+          eq.push({date: rows[i].date, equity: portfolioValue});
           continue;
         }
 
-        // Compute today's portfolio return as the average of active trade returns for today
-        // Each trade's per-day return is close(t)/close(t-1) over its own timeline;
-        // we approximate using underlying price series on consecutive days.
-        let dailyReturnSum=0; let count=0;
-        for(const t of activeIdx){
-          const tr=trades[t];
-          const idxPrev=Math.max(tr.triggerIndex, i-1);
-          const pxPrev=rows[idxPrev].close;
-          const pxCurr=rows[i].close;
-          if(pxPrev>0 && Number.isFinite(pxPrev) && Number.isFinite(pxCurr)){
-            const r=pxCurr/pxPrev; // 1+daily return for that leg (clamped per trade timeline)
-            dailyReturnSum += r;
-            count++;
-          }
-        }
-        const avgFactor = count>0 ? (dailyReturnSum/count) : 1;
-
-        // Update portfolio value multiplicatively by the average factor
-        portfolioValue = portfolioValue * avgFactor;
-        eq.push({date:rows[i].date, equity:portfolioValue});
+        const r = rows[i].close / rows[i-1].close; // identical for all active (same instrument)
+        portfolioValue *= r; // equal-weight daily rebalance across active legs
+        eq.push({date: rows[i].date, equity: portfolioValue});
       }
     }
     return eq;
@@ -1101,8 +1079,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
           // Position tooltip relative to the equity chart canvas, close to the dot
           const canvas = $("#equityChart");
           const rect = canvas.getBoundingClientRect();
-          tip.style.left = (rect.left + dot.px - 24) + "px"; // ~24px to the left of dot
-          tip.style.top  = (rect.top + dot.py - 8) + "px";   // ~8px above
+          tip.style.left = (rect.left + dot.px - 300) + "px"; // ~24px to the left of dot
+          tip.style.top  = (rect.top + dot.py - 50) + "px";   // ~8px above
           tip.innerHTML =
             `<div><strong>Dates:</strong> ${datesRow}</div>`+
             `<div><strong>Entry:</strong> ${trade.triggerClose.toFixed(2)}</div>`+
@@ -1141,7 +1119,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   }
 
   /* ===== Wiring ===== */
-  $("#loadInstr").addEventListener("click",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ alert("Select a JSON file first."); return; } loadInstrumentsFile(f); });
+  $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
   $("#search").addEventListener("input",()=>{ renderSearch($("#searchResults"), filterInstruments($("#search").value), (o)=>{ SELECTED=o; STATE.name=o.name; showSelected("sel",o); $("#searchResults").innerHTML=""; }); });
   $("#indexSearch").addEventListener("input",()=>{ renderSearch($("#indexResults"), filterInstruments($("#indexSearch").value), (o)=>{ INDEX_SELECTED=o; showSelected("index",o); $("#indexResults").innerHTML=""; }); });
   $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); });
