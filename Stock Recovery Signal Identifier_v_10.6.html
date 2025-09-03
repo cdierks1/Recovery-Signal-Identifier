@@ -45,9 +45,10 @@ details .body{padding:12px;border-top:1px solid var(--grid)}
 /* chart sizing */
 #chartBox{position:relative;height:56vh;min-height:420px}
 #equityBox{position:relative;height:220px}
-canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:12px}
+canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:12px;cursor:crosshair}
 /* HUD + tooltip */
-.hud{position:absolute;top:10px;left:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none}
+.hud{position:absolute;top:10px;left:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none;pointer-events:none;z-index:10}
+.hud-right{position:absolute;top:10px;right:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none;pointer-events:none;z-index:10}
 .tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0;z-index:2000}
 /* help */
 .help{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--ink);border-radius:50%;font-size:11px;cursor:help;position:relative}
@@ -226,6 +227,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
       <canvas id="chart" width="973" height="524"></canvas>
       <div id="tip" class="tooltip"></div>
       <div id="hud" class="hud"></div>
+      <div id="hudRight" class="hud-right"></div>
     </div>
     <div class="card legend">
       <div class="flex">
@@ -259,6 +261,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
       <div id="equityBox" style="margin-top:10px" class="card">
         <canvas id="equityChart" width="947" height="200"></canvas>
         <div id="equityHud" class="hud"></div>
+        <div id="equityHudRight" class="hud-right"></div>
       </div>
     </div>
   </main>
@@ -672,6 +675,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       this.dots=[]; // {idx, role, pairIdx, px, py}
       this.hoverDot=null;
       this.onhover=null; // {i, dot}
+      this.onrender=null; // callback when chart renders
       this._bind(); this.resize();
     }
     _bind(){
@@ -755,7 +759,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
     x2px(x){ const {l,r}=this.padding; const w=this.canvas.clientWidth-l-r; return l + (x-this.xmin)/(this.xmax-this.xmin)*w; }
     y2px(y){ const {t,b}=this.padding; const [mn,mx]=this.fixedY||this.computeYDomain(); const h=this.canvas.clientHeight-t-b; return t + (1-(y-mn)/(mx-mn))*h; }
-    px2x(px){ const {l,r}=this.padding; const w=this.canvas.clientWidth-l-r; return this.xmin + (px-l)/Math.max(1,w)*(this.xmax-this.xmin); }
+    px2x(px){
+      const {l,r}=this.padding;
+      const w=this.canvas.clientWidth-l-r;
+      return this.xmin + (px-l)/Math.max(1,w)*(this.xmax-this.xmin);
+    }
 
     _hitTestDot(){
       if(!this.pointer||!this.dots.length) { this.hoverDot=null; return; }
@@ -804,12 +812,12 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       let moved=false; for(let i=xa;i<=xb;i++){ const y=this._rebasedVal(i,xa); if(!Number.isFinite(y)) continue; const px=this.x2px(i), py=this.y2px(y); if(!moved){ctx.moveTo(px,py); moved=true;} else ctx.lineTo(px,py); }
       ctx.stroke();
 
-      // dots (store px/py for hit-testing) – use correct y positioning
+      // dots (store px/py for hit-testing) – use correct y positioning matching main line
       for(const d of this.dots){
         if(d.idx<xa||d.idx>xb){ d.px=null; d.py=null; continue; }
         d.px=this.x2px(d.idx);
-        // For equity chart, use the equity value (already in the correct scale)
-        const yVal = this.series ? this.series.value(d.idx) : 0;
+        // Match the line's y by using the same rebasing logic against first visible index
+        const yVal = this._rebasedVal(d.idx, xa);
         d.py=this.y2px(yVal);
 
         ctx.beginPath(); ctx.arc(d.px,d.py,4,0,Math.PI*2);
@@ -834,10 +842,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       }
       // crosshair
       if(this.pointer){
-        ctx.strokeStyle="rgba(255,255,255,0.25)"; const px=this.pointer.x;
+        ctx.strokeStyle="rgba(255,255,255,0.25)";
+        const px=this.pointer.x;
         ctx.beginPath(); ctx.moveTo(px,t); ctx.lineTo(px,H-b); ctx.stroke();
       }
       ctx.restore();
+
+      // Call onrender callback if set (no re-rendering here)
+      if(this.onrender) this.onrender();
     }
   }
 
@@ -855,7 +867,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   function renderMainChart(){
     const rows=STATE.rows;
-    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#tip").style.opacity=0; return; }
+    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#hudRight").style.display="none"; $("#tip").style.opacity=0; return; }
 
     const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
     const rel = relOn ? computeRelativePerformance(rows, STATE.indexRows) : null;
@@ -878,6 +890,31 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
     chart.setDots(dots);
 
+    // Function to update right-edge HUD based on current visible window
+    const updateRightEdgeHud = ()=>{
+      const [visibleStart, visibleEnd] = chart.visibleRange();
+      if(visibleEnd >= 0 && visibleEnd < rows.length){
+        const hudRight = $("#hudRight");
+        const lastVisibleRow = rows[visibleEnd];
+        if(relOn){
+          const rel = computeRelativePerformance(rows, STATE.indexRows);
+          const baseRel = rel[visibleStart] ?? 0;
+          const lastRel = rel[visibleEnd] ?? 0;
+          const rebased = ((1+lastRel)/(1+baseRel)) - 1;
+          hudRight.textContent = (rebased >= 0 ? "+" : "") + (rebased * 100).toFixed(2) + "%";
+        } else {
+          hudRight.textContent = lastVisibleRow.close.toFixed(2);
+        }
+        hudRight.style.display = "block";
+      } else {
+        $("#hudRight").style.display = "none";
+      }
+    };
+
+    // Initial update and keep in sync on every render (pan/zoom)
+    updateRightEdgeHud();
+    chart.onrender = updateRightEdgeHud;
+
     chart.onhover = (evt)=>{
       const {i, dot} = evt || {};
       const hud=$("#hud"), tip=$("#tip");
@@ -886,13 +923,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       // HUD (rebased if relative)
       let displayValue = rows[i].close;
       if(relOn){
-        // Use the first visible index as base for consistency with chart display
+        // Use precomputed rel[] and rebase to first visible index
         const [a] = chart.visibleRange();
-        const baseValue = rows[a].close;
-        const indexBase = idxMap.get(toISO(rows[a].date))?.close ?? 0;
-        const currentValue = rows[i].close;
-        const currentIndex = idxMap.get(toISO(rows[i].date))?.close ?? 0;
-        displayValue = ((currentValue/baseValue)/(currentIndex/indexBase)) - 1; // rebased to first visible %
+        const baseRel = rel[a] ?? 0;
+        const curRel  = rel[i] ?? 0;
+        displayValue = ((1+curRel)/(1+baseRel)) - 1;
         hud.style.display="block";
         hud.textContent = toISO(rows[i].date) + " • " + (displayValue*100).toFixed(2)+"%";
       }else{
@@ -933,7 +968,18 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       // Ensure main chart uses CSS transform positioning
       tip.style.transform = "translate(-50%, -120%)";
       if(chart.pointer){ tip.style.left=chart.pointer.x+"px"; tip.style.top=chart.pointer.y+"px"; }
-      let tooltipContent = (relOn ? ("Rel: "+(displayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2)));
+
+      // Calculate display value for tooltip
+      let tooltipDisplayValue = rows[i].close;
+      if(relOn){
+        // Use precomputed rel[] rebased to first visible index
+        const [a] = chart.visibleRange();
+        const baseRel = rel[a] ?? 0;
+        const curRel  = rel[i] ?? 0;
+        tooltipDisplayValue = ((1+curRel)/(1+baseRel)) - 1;
+      }
+
+      let tooltipContent = (relOn ? ("Rel: "+(tooltipDisplayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2)));
       if(sma && sma[i]!=null){
         if(relOn){
           // Rebase SMA to first visible index for tooltip consistency
@@ -999,6 +1045,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     STATE.equity=eq;
     if(!eq.length){
       ["btTotal","btCAGR","btDD","btTrades","btWinRate","btAvgWinLoss","btPF","btSharpe"].forEach(id=>$("#"+id).textContent="—");
+      $("#equityHudRight").style.display="none";
       return;
     }
     const base=eq[0].equity, vals=eq.map(x=>x.equity);
@@ -1054,6 +1101,19 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       }
     }
     eqChart.setDots(tradeDots);
+
+    // Update right-edge HUD with last visible equity point
+    const [eqVisibleStart, eqVisibleEnd] = eqChart.visibleRange();
+    if(eqVisibleEnd >= 0 && eqVisibleEnd < eq.length){
+      const hudRight = $("#equityHudRight");
+      const lastVisibleEquity = eq[eqVisibleEnd].equity;
+      const relValue = (lastVisibleEquity / chartBase) - 1;
+      hudRight.textContent = (relValue >= 0 ? "+" : "") + (relValue * 100).toFixed(2) + "%";
+      hudRight.style.display = "block";
+    } else {
+      $("#equityHudRight").style.display = "none";
+    }
+
     eqChart.onhover=(evt)=>{
       const {i, dot} = evt || {};
 
@@ -1124,7 +1184,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
           // Position tooltip relative to the equity chart canvas, close to cursor
           const canvas = $("#equityChart");
           const rect = canvas.getBoundingClientRect();
-          tip.style.left = (rect.left + eqChart.pointer.x - 20) + "px"; // ~20px to the left of cursor
+          tip.style.left = (rect.left + eqChart.pointer.x - 400) + "px"; // ~20px to the left of cursor
           tip.style.top  = (rect.top + eqChart.pointer.y - 8) + "px";   // ~8px above
         }
         tip.innerHTML = "Equity: "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
