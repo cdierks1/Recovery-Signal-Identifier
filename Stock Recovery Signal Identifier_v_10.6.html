@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Recovery Signal Identifier — v10.6</title>
+<style>
+:root{
+  --bg:#0b0f14; --panel:#121821; --ink:#e6eef7; --muted:#9fb3c8; --accent:#4da3ff;
+  --line:#64d2ff; --grid:#223043; --red:#ff4d4d; --green:#39e29d; --yellow:#ffd700;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial}
+h2{margin:0 0 6px 0;font-size:18px}
+.muted{color:var(--muted)}
+.wrap{display:grid;grid-template-columns:400px 1fr;gap:16px;height:100%;padding:12px}
+aside.left{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:16px;overflow:auto}
+main.right{display:grid;grid-template-rows:auto auto 1fr;gap:8px}
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--grid);font-size:12px}
+label{font-size:12px;color:var(--muted)}
+input[type="text"],input[type="number"],input[type="date"],input[type="password"],input[type="file"]{
+  width:100%;padding:8px;border-radius:8px;border:1px solid var(--grid);background:#0e141d;color:var(--ink)
+}
+input[type="checkbox"]{transform:translateY(1px)}
+button{background:var(--accent);color:#fff;padding:10px 12px;border:none;border-radius:10px;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;border:1px solid var(--grid);color:var(--ink)}
+button:disabled{opacity:.6;cursor:not-allowed}
+.list{max-height:160px;overflow:auto;border:1px dashed var(--grid);border-radius:8px}
+.list .item{padding:6px 8px;cursor:pointer;border-bottom:1px dashed #1f2a3a}
+.list .item:hover{background:#0e141d}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right}
+th:first-child,td:first-child{text-align:left}
+details.card{padding:0;overflow:hidden}
+details>summary{list-style:none;cursor:pointer;padding:12px;font-weight:700;display:flex;align-items:center;gap:8px}
+details>summary::marker{display:none}
+.chev{width:10px;height:10px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:rotate(45deg);transition:.2s}
+details[open] .chev{transform:rotate(225deg)}
+details .body{padding:12px;border-top:1px solid var(--grid)}
+/* chart sizing */
+#chartBox{position:relative;height:56vh;min-height:420px}
+#equityBox{position:relative;height:220px}
+canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:12px}
+/* HUD + tooltip */
+.hud{position:absolute;top:10px;left:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none}
+.tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0;z-index:2000}
+/* help */
+.help{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--ink);border-radius:50%;font-size:11px;cursor:help;position:relative}
+.help:hover::after{content:attr(data-tip);position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;min-width:200px;max-width:320px;white-space:normal}
+/* responsive */
+@media (max-width:1100px){
+  .wrap{grid-template-columns:1fr}
+  aside.left{order:2}
+  main.right{order:1}
+  #chartBox{height:50vh;min-height:360px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="left">
+    <h2>Stock Recovery Signal Identifier</h2>
+    <div class="muted" style="margin-bottom:10px">Analyze dip → recovery and breakout signals with customizable triggers and metrics.</div>
+
+    <details id="dataSrc" class="card" open="">
+      <summary><span class="chev"></span> Data source &amp; setup <span class="muted" style="font-weight:400">(Börsdata API + local instruments JSON)</span></summary>
+      <div class="body">
+        <div class="grid2">
+          <div>
+            <label>API key</label>
+            <input id="apiKey" type="password" placeholder="Enter Börsdata API key">
+          </div>
+
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input id="instrFile" type="file" accept="application/json">
+        </div>
+        <div id="instrStatus" class="muted" style="margin-top:6px">No file loaded. Expected key: <code>instruments</code>.</div>
+      </div>
+    </details><div class="card">
+      <div class="row"><strong>Instrument search</strong></div>
+      <input id="search" type="text" placeholder="Search name / ticker…">
+      <div id="searchResults" class="list" style="margin-top:6px"></div>
+      <div class="grid3" style="margin-top:8px">
+        <div id="selName" class="pill">—</div>
+        <div id="selTicker" class="pill">—</div>
+        <div id="selInsId" class="pill">—</div>
+      </div>
+
+      <div class="row" style="margin-top:10px"><strong>Benchmark (index) search</strong></div>
+      <input id="indexSearch" type="text" placeholder="Search index…">
+      <div id="indexResults" class="list" style="margin-top:6px"></div>
+      <div class="grid3" style="margin-top:8px">
+        <div id="indexSelName" class="pill">—</div>
+        <div id="indexSelTicker" class="pill">—</div>
+        <div id="indexSelInsId" class="pill">—</div>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button id="fetchBtn">Fetch prices</button>
+        <div>
+            <label>From date</label>
+            <input id="fromDate" type="date" value="2024-01-01">
+          </div><button id="clearSel" class="ghost">Clear instrument</button>
+        <button id="clearIndexSel" class="ghost">Clear index</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label><input type="checkbox" id="relativeToIndex"> Relative to index</label>
+        <span class="help" data-tip="If checked, the price chart is rebased to the FIRST visible date (0%) and uses % on Y.">?</span>
+      </div>
+    </div>
+
+
+
+    <details class="card" open="">
+      <summary><span class="chev"></span> Signal parameters</summary>
+      <div class="body">
+        <div class="grid3">
+          <div><label>Recover window (days)</label><input id="window" type="number" min="1" max="60" value="5"></div>
+          <div><label>Dip threshold <br>(%)</label><input id="dipPct" type="number" min="0.1" max="10" step="0.1" value="1.5"></div>
+          <div><label>Delay trigger (days)</label><input id="delay" type="number" min="0" max="60" value="0"></div>
+        </div>
+        <div class="grid3" style="margin-top:8px">
+          <div><label>Horizon <br>(days)</label><input id="horizon" type="number" min="3" max="60" value="10"></div>
+          <div><label>Breakout high (days)</label><input id="highestSince" type="number" min="0" max="250" value="0"></div>
+          <div class="row" style="align-items:center;margin-top:18px">
+            <label><input id="requireDip" type="checkbox"> Require dip before breakout</label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <label><input id="onlyBreakout" type="checkbox"> Only trigger on breakout</label>
+          <label><input id="shiftExit" type="checkbox"> Shift exit date with Delay</label>
+        </div>
+        <div class="card" style="margin-top:8px">
+          <div class="row">
+            <label><input id="cliffOn" type="checkbox"> Close trigger on cliff</label>
+            <span class="help" data-tip="Exit early after entry if price breaks a recent low or drops more than Max drop over Lookback days.">?</span>
+          </div>
+          <div id="cliffCfg" class="grid2" style="margin-top:8px">
+            <div><label>Lookback days for low</label><input id="cliffDays" type="number" min="1" max="60" value="4"></div>
+            <div><label>Max drop (%)</label><input id="cliffPct" type="number" min="0.1" max="50" step="0.1" value="3"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:8px">
+          <div class="row">
+            <label><input id="momentumExit" type="checkbox"> Use Momentum based exit</label>
+            <span class="help" data-tip="After Horizon (min hold), keep holding until a drop of ≥ Drop % over the last N days occurs, or until Max extend.">?</span>
+          </div>
+          <div class="grid3" style="margin-top:8px">
+            <div><label>Drop <br>%</label><input id="momDropPct" type="number" min="0.5" max="50" step="0.1" value="5"></div>
+            <div><label>Lookback N (days)</label><input id="momLookback" type="number" min="2" max="20" value="3"></div>
+            <div><label>Max extend (days)</label><input id="momMaxExtend" type="number" min="0" max="250" value="120"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:8px">
+          <div class="row">
+            <label><input id="smaCrossOn" type="checkbox"> Trigger on SMA crossing</label>
+            <span class="help" data-tip="Entries when price crosses above SMA by +X%; exits when it falls below SMA by -Y%.">?</span>
+          </div>
+          <div class="grid3" style="margin-top:8px">
+            <div><label>Above cross-SMA trigger (%)</label><input id="smaCrossEnterPct" type="number" min="0" max="20" step="0.1" value="0.5"></div>
+            <div><label>Below cross-SMA exit (%)</label><input id="smaCrossExitPct" type="number" min="0" max="20" step="0.1" value="0.5"></div>
+            <div class="muted" style="display:flex;align-items:center">Uses the SMA period below.</div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary><span class="chev"></span> Additional indicators &amp; filters</summary>
+      <div class="body">
+        <div class="grid2">
+          <div><label>Moving average (days)</label><input id="smaPeriod" type="number" min="0" max="200" value="20"></div>
+          <div><label>Volume threshold (% of avg)</label><input id="volumeThreshold" type="number" min="0" max="500" step="10" value="100"></div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <label><input id="aboveSMA" type="checkbox"> Only trigger if above SMA</label>
+          <label><input id="belowSMA" type="checkbox"> Only trigger if below SMA</label>
+        </div>
+      </div>
+    </details>
+
+    <div class="card">
+      <div class="row">
+        <label><input id="autoY" type="checkbox" checked=""> Auto-scale Y</label>
+        <button id="lockY" class="ghost">Lock Y to current</button>
+        <button id="resetY" class="ghost">Reset Y</button>
+        <button id="resetZoom" class="ghost">Reset zoom</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="runBtn">Run</button>
+        <button id="exportSignals" class="ghost">Export signals CSV</button>
+        <button id="exportPNG" class="ghost">Export chart PNG</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid3">
+        <div><div class="muted">Signals</div><div id="mSignals" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted" id="labelAvg">Avg 10d</div><div id="mAvg" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted">Hit rate</div><div id="mHit" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted" id="labelMed">Med 10d</div><div id="mMed" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted" id="labelMax">Max 10d</div><div id="mMax" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted" id="labelMin">Min 10d</div><div id="mMin" style="font-weight:700;font-size:18px">—</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><strong>Signals</strong><span id="sigSummary" class="muted">—</span></div>
+      <table>
+        <thead>
+          <tr><th>Trigger Date</th><th>Trigger</th><th id="thH">+H/Exit</th><th>Return</th><th>Type</th><th>EType</th></tr>
+        </thead>
+        <tbody id="sigTable"></tbody>
+      </table>
+    </div>
+  </aside>
+
+  <main class="right">
+    <div id="chartBox" class="card">
+      <canvas id="chart" width="973" height="524"></canvas>
+      <div id="tip" class="tooltip"></div>
+      <div id="hud" class="hud"></div>
+    </div>
+    <div class="card legend">
+      <div class="flex">
+        <span class="pill">Line = Close / Relative</span>
+        <span class="pill" style="background:transparent;border-color:var(--yellow);color:var(--yellow)">SMA (yellow)</span>
+        <span class="pill" style="background:transparent;border-color:var(--red);color:var(--red)">• Red = entry</span>
+        <span class="pill" style="background:transparent;border-color:var(--green);color:var(--green)">• Green = exit</span>
+        <span class="pill">Hover a dot to highlight pair</span>
+        <span class="pill">Scroll = zoom • Drag = pan</span>
+      </div>
+    </div>
+
+    <div id="btCard" class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <strong>Backtest</strong>
+        <div class="flex" style="gap:12px">
+          <label style="font-size:12px"><input type="checkbox" id="sequentialTrades" checked=""> Sequential (no overlaps)</label>
+          <button id="exportEquity" class="ghost">Export equity CSV</button>
+        </div>
+      </div>
+      <div class="grid4" style="margin-top:8px">
+        <div><div class="muted">Total return</div><div id="btTotal" style="font-weight:700">—</div></div>
+        <div><div class="muted">CAGR</div><div id="btCAGR" style="font-weight:700">—</div></div>
+        <div><div class="muted">Max DD</div><div id="btDD" style="font-weight:700">—</div></div>
+        <div><div class="muted">Trades</div><div id="btTrades" style="font-weight:700">—</div></div>
+        <div><div class="muted">Win rate</div><div id="btWinRate" style="font-weight:700">—</div></div>
+        <div><div class="muted">Avg win / loss</div><div id="btAvgWinLoss" style="font-weight:700">—</div></div>
+        <div><div class="muted">Profit factor</div><div id="btPF" style="font-weight:700">—</div></div>
+        <div><div class="muted">Sharpe (ann.)</div><div id="btSharpe" style="font-weight:700">—</div></div>
+      </div>
+      <div id="equityBox" style="margin-top:10px" class="card">
+        <canvas id="equityChart" width="947" height="200"></canvas>
+        <div id="equityHud" class="hud"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  /* ===== Utils ===== */
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+  const toISO = d => d.toISOString().slice(0,10);
+  const parseDate = s => new Date(s);
+  const CSS = getComputedStyle(document.documentElement);
+  const COL = {
+    red:   CSS.getPropertyValue('--red').trim()    || '#ff4d4d',
+    green: CSS.getPropertyValue('--green').trim()  || '#39e29d',
+    yellow:CSS.getPropertyValue('--yellow').trim() || '#ffd700',
+    line:  CSS.getPropertyValue('--line').trim()   || '#64d2ff'
+  };
+  const fmt = n => n==null ? "—" : Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+  const fmtPct = (x,dec=2) => (x>=0?"+":"") + (100*x).toFixed(dec) + "%";
+  const fmtPctCol = x => '<span style="color:'+(x>=0?COL.green:COL.red)+'">'+fmtPct(x)+'</span>';
+
+  function rollingAvg(arr, n){
+    const out = new Array(arr.length).fill(null);
+    let sum=0, cnt=0;
+    for(let i=0;i<arr.length;i++){
+      const v = arr[i];
+      if(v!=null){ sum+=v; cnt++; }
+      if(i>=n){
+        const old = arr[i-n];
+        if(old!=null){ sum-=old; cnt--; }
+      }
+      if(i>=n-1 && cnt>0){ out[i]=sum/cnt; }
+    }
+    return out;
+  }
+  function computeSMA(rows, period){
+    if(!period || period<=1) return new Array(rows.length).fill(null);
+    return rollingAvg(rows.map(r=>r.close), period);
+  }
+  function computeSMAArray(vals, period){
+    if(!period || period<=1) return new Array(vals.length).fill(null);
+    return rollingAvg(vals, period);
+  }
+  function maxDrawdown(vals){
+    if(!vals.length) return 0;
+    let peak = vals[0] || 0.0001; // ensure we don't divide by zero
+    let dd = 0;
+    for(const v of vals){
+      if(v > 0){ // only update peak with positive values
+        peak = Math.max(peak, v);
+      }
+      if(peak > 0){
+        dd = Math.min(dd, v/peak - 1);
+      }
+    }
+    return dd;
+  }
+  function firstDefined(){ for(let i=0;i<arguments.length;i++){ const v=arguments[i]; if(v!==undefined&&v!==null&&v!=="") return v; } return null; }
+
+
+
+  /* ===== State ===== */
+  let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—" };
+
+  /* ===== Instruments ===== */
+  function mapInstruments(arr){
+    return arr.map(o=>({
+      insId:firstDefined(o.insId,o.insid,o.insID,o.id),
+      name:firstDefined(o.name,o.CompanyName,o.company,o.n),
+      urlName:firstDefined(o.urlName,o.url,""),
+      ticker:firstDefined(o.ticker,o.symbol,o.s),
+      yahoo:firstDefined(o.yahoo,"")
+    })).filter(o=>o.insId && o.name);
+  }
+  function autoDetect(json){
+    let best=null;
+    (function walk(x){
+      if(Array.isArray(x)){ if(x.length && typeof x[0]==="object"){ if(!best || x.length>best.length) best=x; } x.forEach(walk); }
+      else if(x && typeof x==="object"){ Object.values(x).forEach(walk); }
+    })(json);
+    return best||[];
+  }
+  async function loadInstrumentsFile(file){
+    try{
+      const txt=await file.text();
+      const json=JSON.parse(txt);
+      INSTRUMENTS=mapInstruments(autoDetect(json));
+      $("#instrStatus").textContent="Loaded "+INSTRUMENTS.length+" instruments.";
+    }catch(e){ $("#instrStatus").textContent="Failed to parse JSON."; console.error(e); }
+  }
+  function filterInstruments(q){
+    q=(q||"").trim().toLowerCase(); if(!q) return [];
+    const score=o=>{ const n=(o.name||"").toLowerCase(), t=(o.ticker||"").toLowerCase(); let s=0; if(n.includes(q)) s+=2; if(t.includes(q)) s+=3; if(n.startsWith(q)||t.startsWith(q)) s+=2; return s; };
+    return INSTRUMENTS.map(o=>({...o,_s:score(o)})).filter(o=>o._s>0).sort((a,b)=>b._s-a._s).slice(0,40);
+  }
+  function renderSearch(el, results, onPick){
+    el.innerHTML = results.map(o=>'<div class="item" data-id="'+o.insId+'"><strong>'+(o.ticker||"")+'</strong> — '+o.name+'</div>').join("");
+    el.querySelectorAll(".item").forEach(it=>{
+      it.addEventListener("click",()=>{
+        const id=+it.getAttribute("data-id");
+        const obj=results.find(x=>+x.insId===id);
+        onPick(obj);
+      });
+    });
+  }
+  function showSelected(prefix,obj){
+    const map = prefix==="sel" ? ["#selName","#selTicker","#selInsId"] : ["#indexSelName","#indexSelTicker","#indexSelInsId"];
+    $(map[0]).textContent = obj? obj.name : "—";
+    $(map[1]).textContent = obj? (obj.ticker||"—") : "—";
+    $(map[2]).textContent = obj? obj.insId : "—";
+  }
+
+  /* ===== Börsdata ===== */
+  async function fetchPrices(insId, from, apiKey){
+    let all=[]; const max=3000;
+    for(let guard=0;guard<20;guard++){
+      const url="https://apiservice.borsdata.se/v1/instruments/"+insId+"/stockprices?authKey="+encodeURIComponent(apiKey)+"&from="+from+"&maxCount="+max;
+      const r=await fetch(url);
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const j=await r.json();
+      const arr=(j.stockPricesList||[]).map(x=>({date:parseDate(x.d),open:+x.o,high:+x.h,low:+x.l,close:+x.c,volume:x.v!=null?+x.v:null})).sort((a,b)=>a.date-b.date);
+      if(!arr.length) break;
+      all=all.concat(arr);
+      const last=arr[arr.length-1].date; const next=new Date(+last+24*3600*1000); from=toISO(next);
+      if(arr.length<max) break;
+    }
+    const m=new Map(); all.forEach(r=>m.set(toISO(r.date),r));
+    return Array.from(m.values()).sort((a,b)=>a.date-b.date);
+  }
+
+  /* ===== Relative perf ===== */
+  function computeRelativePerformance(stockRows,indexRows){
+    if(!stockRows.length || !indexRows.length) return stockRows.map(()=>null);
+    const idxMap=new Map(indexRows.map(r=>[toISO(r.date),r]));
+    let baseS=null, baseI=null;
+    const rel=new Array(stockRows.length).fill(null);
+    for(let i=0;i<stockRows.length;i++){
+      const r=stockRows[i], ir=idxMap.get(toISO(r.date));
+      if(!ir){ rel[i]=(i>0?rel[i-1]:0); continue; }
+      if(baseS==null){ baseS=r.close; baseI=ir.close; rel[i]=0; }
+      else{ rel[i]= (r.close/baseS)/(ir.close/baseI) - 1; }
+    }
+    return rel;
+  }
+
+  /* ===== Small helpers for exits ===== */
+  function arrMin(arr,i0,i1){ let m=Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v<m){m=v; idx=i;} } return {v:m,i:idx}; }
+  function arrMax(arr,i0,i1){ let m=-Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v>m){m=v; idx=i;} } return {v:m,i:idx}; }
+
+  // Momentum exit: first exit index at/after horizon where N-day drop >= dropPct,
+  // or cap (horizon + maxExtend) if no such drop occurs.
+  function momentumExit(closes,trigIdx,horizon,lookback,dropPct,maxExtend=1e9,onlyIfPositiveAtHorizon=false){
+    const N=closes.length;
+    const hIdx=Math.min(trigIdx+horizon,N-1);
+    if(onlyIfPositiveAtHorizon && closes[hIdx] <= closes[trigIdx]) return hIdx;
+    const endCap=Math.min(trigIdx + horizon + (maxExtend|0), N-1);
+    for(let d=hIdx+1; d<=endCap; d++){
+      const look=d-lookback; if(look<trigIdx) continue;
+      const r=closes[d]/closes[look]-1;
+      if(r <= -dropPct/100) return d;
+    }
+    return endCap;
+  }
+
+// Early exit based on CLOSE drawdowns only (no low-break).
+// Exit at j if the CLOSE has dropped by ≥ dropPct either:
+// (a) from the highest CLOSE in the prior `lookback` bars [start .. j-1], or
+// (b) from the entry/trigger CLOSE (closes[fromIdx]).
+function cliffExitIndex(closes, lows, fromIdx, toIdx, lookback, dropPct){
+  if (!lookback || !dropPct) return null;
+  const thr = -dropPct / 100;
+  for (let j = fromIdx + 1; j <= toIdx; j++){
+    const start = Math.max(fromIdx, j - lookback);
+    if (start > j - 1) continue; // need at least 1 prior bar
+
+    // highest close in prior window
+    let hiPrev = -Infinity;
+    for (let k = start; k <= j - 1; k++){
+      const ck = closes[k];
+      if (ck > hiPrev) hiPrev = ck;
+    }
+
+    const ddWin   = closes[j] / hiPrev          - 1; // vs window high close
+    const ddEntry = closes[j] / closes[fromIdx] - 1; // vs entry close
+    if (ddWin <= thr || ddEntry <= thr) return j;
+  }
+  return null;
+}
+
+
+/* ===== Signals ===== */
+function detectSignals(rows, windowDays, dipPct, horizon, opts){
+  const N = rows.length; if (!N) return [];
+  const closes  = rows.map(r => r.close);
+  const lows    = rows.map(r => r.low ?? r.close);
+  const volumes = rows.map(r => r.volume ?? null);
+  const volAvg  = rollingAvg(volumes, 50);
+  const sma     = opts.sma || new Array(N).fill(null);
+
+  function passVolume(i){
+    if (!opts.volumeThreshold || !volAvg[i]) return true;
+    return volumes[i] != null && volumes[i] >= volAvg[i] * (opts.volumeThreshold / 100);
+  }
+  function passSMAFilter(i){
+    if (!sma[i]) return !(opts.aboveSMA || opts.belowSMA);
+    if (opts.aboveSMA) return closes[i] >= sma[i];
+    if (opts.belowSMA) return closes[i] <= sma[i];
+    return true;
+  }
+
+  const signals = [];
+
+  // ===== SMA cross strategy =====
+  if (opts.smaCrossOn && sma.some(x => x != null)){
+    for (let i = 1; i < N; i++){
+      if (!sma[i] || !sma[i-1]) continue;
+      const up=(opts.smaCrossEnterPct||0)/100, dn=(opts.smaCrossExitPct||0)/100;
+      const wasBelow = closes[i-1] <  sma[i-1]*(1+up);
+      const isAbove  = closes[i]   >= sma[i]  *(1+up);
+      if (wasBelow && isAbove && passVolume(i) && passSMAFilter(i)){
+        let trig = i + (opts.delayDays || 0);
+        if (trig >= N) break;
+
+        // Horizon end: if ShiftExit is ON, start from trig; else from original i
+        const baseStart  = (opts.shiftExit ? trig : i);
+        const horizonIdx = Math.min(baseStart + horizon, N - 1);
+
+        // Early exit: SMA fall-below
+        let smaExitIdx = Infinity;
+        for (let j = trig + 1; j < N; j++){
+          if (sma[j] && closes[j] <= sma[j] * (1 - dn)){ smaExitIdx = j; break; }
+        }
+
+        // Early exit: CLIFF (pre-horizon only)
+        const cliffIdxRaw = opts.cliffOn
+          ? cliffExitIndex(closes, lows, trig, horizonIdx, opts.cliffDays, opts.cliffPct)
+          : null;
+        const cliffIdx = (cliffIdxRaw == null) ? Infinity : cliffIdxRaw;
+
+        // Hold leg: Momentum (post-horizon)
+        let momIdx = null, holdIdx = horizonIdx;
+        if (opts.momentumExit){
+          // If ShiftExit is OFF, keep the same *calendar* horizon by reducing days by delay
+          const horizonForMom = Math.max(0, horizon - (opts.shiftExit ? 0 : (opts.delayDays || 0)));
+          momIdx  = momentumExit(closes, trig, horizonForMom, opts.momLookback, opts.momDropPct, opts.momMaxExtend, false);
+          holdIdx = Math.max(horizonIdx, momIdx);
+        }
+
+        // Final end
+        const earlyIdx = Math.min(smaExitIdx, cliffIdx);
+        const end      = Math.min(earlyIdx, holdIdx);
+
+        // Exit type
+        let exitType = "horizon";
+        if (end === smaExitIdx) exitType = "sma-cross";
+        else if (end === cliffIdx) exitType = "cliff";
+        else if (opts.momentumExit && momIdx != null && end === momIdx && momIdx > horizonIdx) exitType = "momentum";
+
+        const ret = closes[end]/closes[trig] - 1;
+        signals.push({
+          kind: "sma-cross",
+          triggerIndex: trig, triggerDate: rows[trig].date, triggerClose: closes[trig],
+          endIndex: end, endDate: rows[end].date, endClose: closes[end],
+          fwdRet: ret,
+          cliff: exitType === "cliff",
+          exitType
+        });
+      }
+    }
+  }
+
+  // ===== Recovery / Breakout strategy =====
+  for (let t = Math.max(1, windowDays); t < N; t++){
+    let breakoutOK = false, recoveryOK = false;
+
+    if ((opts.highestSince|0) > 0){
+      const hs   = Math.max(1, opts.highestSince|0);
+      const from = Math.max(0, t - hs);
+      let mx = -Infinity;
+      for (let k = from; k < t; k++) mx = Math.max(mx, closes[k]);
+      if (closes[t] > mx) breakoutOK = true;
+    }
+
+    if (windowDays > 0){
+      const d0 = Math.max(0, t - windowDays);
+      const anchor = arrMax(closes, d0, t - 1);
+      if (anchor.i >= 0){
+        const minSeg = arrMin(closes, anchor.i, t);
+        const drop = minSeg.v / anchor.v - 1;
+        recoveryOK = (drop <= -dipPct/100) && (closes[t] >= anchor.v);
+      }
+    }
+
+    if ((opts.onlyBreakout && breakoutOK) || (!opts.onlyBreakout && (recoveryOK || breakoutOK))){
+      if (opts.requireDip && !recoveryOK) continue;
+      if (!passVolume(t) || !passSMAFilter(t)) continue;
+
+      let trig = t + (opts.delayDays || 0);
+      if (trig >= N) break;
+
+      // Horizon end: if ShiftExit is ON, start from trig; else from original t
+      const baseStart  = (opts.shiftExit ? trig : t);
+      const horizonIdx = Math.min(baseStart + horizon, N - 1);
+
+      // Early exit: CLIFF (pre-horizon only)
+      const cliffIdxRaw = opts.cliffOn
+        ? cliffExitIndex(closes, lows, trig, horizonIdx, opts.cliffDays, opts.cliffPct)
+        : null;
+      const cliffIdx = (cliffIdxRaw == null) ? Infinity : cliffIdxRaw;
+
+      // Hold leg: Momentum (post-horizon, extend only if positive at horizon)
+      let momIdx = null, holdIdx = horizonIdx;
+      if (opts.momentumExit){
+        const horizonForMom = Math.max(0, horizon - (opts.shiftExit ? 0 : (opts.delayDays || 0)));
+        momIdx  = momentumExit(closes, trig, horizonForMom, opts.momLookback, opts.momDropPct, opts.momMaxExtend, true);
+        holdIdx = Math.max(horizonIdx, momIdx);
+      }
+
+      const earlyIdx = cliffIdx;               // only cliff is early here
+      const end      = Math.min(earlyIdx, holdIdx);
+
+      let exitType = "horizon";
+      if (end === cliffIdx) exitType = "cliff";
+      else if (opts.momentumExit && momIdx != null && end === momIdx && momIdx > horizonIdx) exitType = "momentum";
+
+      const ret  = closes[end]/closes[trig] - 1;
+      const kind = (recoveryOK && breakoutOK) ? "recovery+breakout" : (recoveryOK ? "recovery" : "breakout");
+      signals.push({
+        kind,
+        triggerIndex: trig, triggerDate: rows[trig].date, triggerClose: closes[trig],
+        endIndex: end, endDate: rows[end].date, endClose: closes[end],
+        fwdRet: ret,
+        cliff: exitType === "cliff",
+        exitType
+      });
+    }
+  }
+
+  // de-dup & order
+  const seen = new Set(), out = [];
+  for (const s of signals){ if (seen.has(s.triggerIndex)) continue; seen.add(s.triggerIndex); out.push(s); }
+  return out.sort((a,b) => a.triggerIndex - b.triggerIndex);
+}
+
+
+  /* ===== Equity (sequential non-overlapping trades) ===== */
+  function sequentialize(signals){
+    const seq=[]; let lastEnd=-1;
+    for(const s of signals){
+      if(s.triggerIndex>lastEnd){ seq.push(s); lastEnd=s.endIndex; }
+    }
+    return seq;
+  }
+  function computeEquitySeries(rows,signals, useSequential=true){
+    const trades = useSequential ? sequentialize(signals) : signals;
+    if(!rows.length) return [];
+    const eq=[]; let cash=0; let k=0;
+
+    if(useSequential){
+      // Original sequential logic
+      let pos=null;
+      for(let i=0;i<rows.length;i++){
+        if(!pos && k<trades.length && trades[k].triggerIndex===i){
+          pos={entryPx:rows[i].close, eq0:1+cash};
+        }
+        const mark = pos ? pos.eq0*(rows[i].close/pos.entryPx) : (1+cash);
+        eq.push({date:rows[i].date, equity:mark});
+        if(pos && k<trades.length && trades[k].endIndex===i){
+          cash=mark-1; pos=null; k++;
+        }
+      }
+    } else {
+      // Non-sequential portfolio: invest equally across trades that span (i-1, i]
+      let portfolioValue = 1;
+      for (let i = 0; i < rows.length; i++){
+        // day 0: no prior bar
+        if (i === 0){ eq.push({date: rows[i].date, equity: portfolioValue}); continue; }
+
+        const activeIdx = [];
+        for (let t = 0; t < trades.length; t++){
+          const tr = trades[t];
+          // must have been open yesterday and still open today
+          if (tr.triggerIndex < i && i <= tr.endIndex) activeIdx.push(t);
+        }
+
+        if (activeIdx.length === 0){
+          eq.push({date: rows[i].date, equity: portfolioValue});
+          continue;
+        }
+
+        const r = rows[i].close / rows[i-1].close; // identical for all active (same instrument)
+        portfolioValue *= r; // equal-weight daily rebalance across active legs
+        eq.push({date: rows[i].date, equity: portfolioValue});
+      }
+    }
+    return eq;
+  }
+
+  /* ===== Canvas LineChart (rebasing when relative) ===== */
+  class LineChart{
+    constructor(canvas){
+      this.canvas=canvas; this.ctx=canvas.getContext("2d");
+      this.padding={l:56,r:16,t:16,b:28};
+      this.xmin=0; this.xmax=1; this.fixedY=null; this.autoY=true; this.ypad=0.1;
+      this.pointer=null; this.drag=null; this.cross=null;
+      this.relative=false;
+      this.series=null;
+      this.dots=[]; // {idx, role, pairIdx, px, py}
+      this.hoverDot=null;
+      this.onhover=null; // {i, dot}
+      this._bind(); this.resize();
+    }
+    _bind(){
+      window.addEventListener("resize",()=>this.resize());
+      this.canvas.addEventListener("mousemove",(e)=>{
+        const rect=this.canvas.getBoundingClientRect();
+        this.pointer={x:e.clientX-rect.left,y:e.clientY-rect.top};
+        const i=Math.round(this.px2x(this.pointer.x));
+        this.cross=i;
+        this._hitTestDot();
+        if(this.onhover) this.onhover({i: Number.isFinite(i)? i : null, dot: this.hoverDot});
+        this.render();
+      });
+      this.canvas.addEventListener("mouseleave",()=>{
+        this.pointer=null; this.cross=null; this.hoverDot=null;
+        if(this.onhover) this.onhover({i:null,dot:null}); this.render();
+      });
+      this.canvas.addEventListener("wheel",(e)=>{
+        e.preventDefault();
+        const f=Math.exp(-e.deltaY*0.001), cx=this.px2x(e.offsetX);
+        this.xmin=cx+(this.xmin-cx)*f; this.xmax=cx+(this.xmax-cx)*f;
+        this.render();
+      },{passive:false});
+      this.canvas.addEventListener("mousedown",(e)=>{ this.drag={x:e.clientX,xmin:this.xmin,xmax:this.xmax}; });
+      window.addEventListener("mouseup",()=>{ this.drag=null; });
+      window.addEventListener("mousemove",(e)=>{
+        if(!this.drag) return;
+        const dx=e.clientX-this.drag.x;
+        const w=this.canvas.clientWidth-this.padding.l-this.padding.r;
+        const span=this.drag.xmax-this.drag.xmin;
+        const shift=dx/Math.max(1,w)*span;
+        this.xmin=this.drag.xmin-shift; this.xmax=this.drag.xmax-shift;
+        this.render();
+      });
+    }
+    resize(){
+      const dpr=window.devicePixelRatio||1;
+      const w=this.canvas.clientWidth, h=this.canvas.clientHeight;
+      this.canvas.width=Math.max(300,Math.round(w*dpr));
+      this.canvas.height=Math.max(200,Math.round(h*dpr));
+      this.ctx.setTransform(dpr,0,0,dpr,0,0);
+      this.render();
+    }
+    setRelative(on){ this.relative=!!on; }
+    setData(series){ this.series=series; if(series){ this.fitXDomain(series.length); } this.render(); }
+    setDots(dots){ this.dots=dots||[]; this.render(); }
+    setAutoY(flag){ this.autoY=!!flag; if(!flag) this.fixedY=this.computeYDomain(); this.render(); }
+    lockYToCurrent(){ this.fixedY=this.computeYDomain(); this.autoY=false; this.render(); }
+    resetY(){ this.fixedY=null; this.autoY=true; this.render(); }
+    resetZoom(){ if(this.series) this.fitXDomain(this.series.length); this.render(); }
+    fitXDomain(n){ this.xmin=0; this.xmax=Math.max(1,n-1); }
+    visibleRange(){ const n=this.series.length; return [Math.max(0,Math.floor(this.xmin)), Math.min(n-1,Math.ceil(this.xmax))]; }
+
+    _rebasedVal(i,a){
+      const v=this.series.value(i);
+      if(!this.relative) return v;
+      // Use the first visible index 'a' as the base, not the first data point
+      const base=this.series.value(a) ?? 0;
+      return ((1+(v??0))/(1+(base??0))) - 1;
+    }
+    _rebasedAux(i,a){
+      if(!this.series.aux) return null;
+      const u=this.series.aux(i);
+      if(!this.relative || !Number.isFinite(u)) return u;
+      // SMA is already computed on relative data when in relative mode
+      // But we need to rebase it to the first visible index like the main values
+      const baseAux = this.series.aux(a) ?? 0;
+      return ((1+(u??0))/(1+(baseAux??0))) - 1;
+    }
+
+    computeYDomain(){
+      const [a,b]=this.visibleRange(); let mn=Infinity,mx=-Infinity;
+      for(let i=a;i<=b;i++){
+        const y=this._rebasedVal(i,a); if(Number.isFinite(y)){ mn=Math.min(mn,y); mx=Math.max(mx,y); }
+        const u=this._rebasedAux(i,a); if(Number.isFinite(u)){ mn=Math.min(mn,u); mx=Math.max(mx,u); }
+      }
+      if(!Number.isFinite(mn)||!Number.isFinite(mx)){ mn=-1; mx=1; }
+      if(this.relative){ const abs=Math.max(Math.abs(mn),Math.abs(mx)); mn=-abs; mx=abs; }
+      else { const pad=(mx-mn)*this.ypad||1e-6; mn-=pad; mx+=pad; }
+      return [mn,mx];
+    }
+    x2px(x){ const {l,r}=this.padding; const w=this.canvas.clientWidth-l-r; return l + (x-this.xmin)/(this.xmax-this.xmin)*w; }
+    y2px(y){ const {t,b}=this.padding; const [mn,mx]=this.fixedY||this.computeYDomain(); const h=this.canvas.clientHeight-t-b; return t + (1-(y-mn)/(mx-mn))*h; }
+    px2x(px){ const {l,r}=this.padding; const w=this.canvas.clientWidth-l-r; return this.xmin + (px-l)/Math.max(1,w)*(this.xmax-this.xmin); }
+
+    _hitTestDot(){
+      if(!this.pointer||!this.dots.length) { this.hoverDot=null; return; }
+      const R=10; let best=null, bestD=1e9;
+      for(const d of this.dots){
+        if(d.px==null||d.py==null) continue;
+        const dx=d.px-this.pointer.x, dy=d.py-this.pointer.y, dd=dx*dx+dy*dy;
+        if(dd<bestD && dd<R*R){ best=d; bestD=dd; }
+      }
+      this.hoverDot=best;
+    }
+    render(){
+      const ctx=this.ctx, W=this.canvas.clientWidth, H=this.canvas.clientHeight;
+      ctx.clearRect(0,0,W,H);
+      if(!this.series) return;
+      const {l,r,t,b}=this.padding;
+      const [xa,xb]=this.visibleRange();
+      const [ymin,ymax]=this.fixedY||this.computeYDomain();
+
+      // frame + grid
+      ctx.save();
+      ctx.strokeStyle="rgba(255,255,255,0.06)"; ctx.lineWidth=1;
+      ctx.strokeRect(l,t,W-l-r,H-t-b);
+      ctx.fillStyle="rgba(255,255,255,0.6)"; ctx.font="12px system-ui,sans-serif";
+      const ticks=6;
+      for(let k=0;k<=ticks;k++){
+        const y=ymin+(ymax-ymin)*k/ticks, py=this.y2px(y);
+        ctx.beginPath(); ctx.moveTo(l,py); ctx.lineTo(W-r,py); ctx.stroke();
+        const lbl=this.relative? (y*100).toFixed(1)+"%" : y.toFixed(2);
+        ctx.fillText(lbl,4,py+4);
+      }
+      // x labels
+      const step=Math.max(1,Math.floor((xb-xa)/6));
+      for(let i=xa;i<=xb;i+=step){
+        const x=this.x2px(i), d=this.series.date(i);
+        ctx.fillText(toISO(d).slice(2), x-16, H-b+16);
+      }
+      // SMA
+      if(this.series.aux){
+        ctx.strokeStyle=COL.yellow; ctx.lineWidth=1.5; ctx.beginPath();
+        let moved=false; for(let i=xa;i<=xb;i++){ const y=this._rebasedAux(i,xa); if(!Number.isFinite(y)) continue; const px=this.x2px(i), py=this.y2px(y); if(!moved){ctx.moveTo(px,py); moved=true;} else ctx.lineTo(px,py); }
+        ctx.stroke();
+      }
+      // main line
+      ctx.strokeStyle=COL.line; ctx.lineWidth=2; ctx.beginPath();
+      let moved=false; for(let i=xa;i<=xb;i++){ const y=this._rebasedVal(i,xa); if(!Number.isFinite(y)) continue; const px=this.x2px(i), py=this.y2px(y); if(!moved){ctx.moveTo(px,py); moved=true;} else ctx.lineTo(px,py); }
+      ctx.stroke();
+
+      // dots (store px/py for hit-testing) – use correct y positioning
+      for(const d of this.dots){
+        if(d.idx<xa||d.idx>xb){ d.px=null; d.py=null; continue; }
+        d.px=this.x2px(d.idx);
+        // For equity chart, use the equity value (already in the correct scale)
+        const yVal = this.series ? this.series.value(d.idx) : 0;
+        d.py=this.y2px(yVal);
+
+        ctx.beginPath(); ctx.arc(d.px,d.py,4,0,Math.PI*2);
+        ctx.fillStyle = d.role==="entry" ? COL.red : COL.green;
+        ctx.fill();
+        // Add a border for visibility
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      // highlight hovered dot + its pair
+      if(this.hoverDot){
+        const pairIdx=this.hoverDot.pairIdx;
+        const isPair=d=>d.idx===pairIdx;
+        for(const d of this.dots){
+          if(d===this.hoverDot || isPair(d)){
+            const R=6;
+            ctx.beginPath(); ctx.arc(d.px,d.py,R,0,Math.PI*2);
+            ctx.lineWidth=2; ctx.strokeStyle="#ffffffcc"; ctx.stroke();
+          }
+        }
+      }
+      // crosshair
+      if(this.pointer){
+        ctx.strokeStyle="rgba(255,255,255,0.25)"; const px=this.pointer.x;
+        ctx.beginPath(); ctx.moveTo(px,t); ctx.lineTo(px,H-b); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  const chart=new LineChart($("#chart"));
+  const eqChart=new LineChart($("#equityChart"));
+
+  /* ===== Rendering & metrics ===== */
+  function updateMetricLabels(){
+    const H=+$("#horizon").value|0;
+    $("#labelAvg").textContent="Avg "+H+"d";
+    $("#labelMed").textContent="Med "+H+"d";
+    $("#labelMax").textContent="Max "+H+"d";
+    $("#labelMin").textContent="Min "+H+"d";
+  }
+
+  function renderMainChart(){
+    const rows=STATE.rows;
+    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#tip").style.opacity=0; return; }
+
+    const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    const rel = relOn ? computeRelativePerformance(rows, STATE.indexRows) : null;
+
+    const smaPeriod = +$("#smaPeriod").value|0;
+    const sma = smaPeriod>0 ? (relOn ? computeSMAArray(rel, smaPeriod) : computeSMA(rows, smaPeriod)) : null;
+
+    chart.setRelative(relOn);
+    chart.setData({
+      length: rows.length,
+      date: i => rows[i].date,
+      value: i => relOn ? rel[i] : rows[i].close,
+      aux: i => sma ? sma[i] : null
+    });
+
+    const dots=[];
+    for(const s of STATE.signals){
+      dots.push({idx:s.triggerIndex, role:"entry", pairIdx:s.endIndex});
+      dots.push({idx:s.endIndex, role:"exit", pairIdx:s.triggerIndex});
+    }
+    chart.setDots(dots);
+
+    chart.onhover = (evt)=>{
+      const {i, dot} = evt || {};
+      const hud=$("#hud"), tip=$("#tip");
+      if(i==null || !rows[i]){ hud.style.display="none"; tip.style.opacity=0; return; }
+
+      // HUD (rebased if relative)
+      let displayValue = rows[i].close;
+      if(relOn){
+        // Use the first visible index as base for consistency with chart display
+        const [a] = chart.visibleRange();
+        const baseValue = rows[a].close;
+        const indexBase = idxMap.get(toISO(rows[a].date))?.close ?? 0;
+        const currentValue = rows[i].close;
+        const currentIndex = idxMap.get(toISO(rows[i].date))?.close ?? 0;
+        displayValue = ((currentValue/baseValue)/(currentIndex/indexBase)) - 1; // rebased to first visible %
+        hud.style.display="block";
+        hud.textContent = toISO(rows[i].date) + " • " + (displayValue*100).toFixed(2)+"%";
+      }else{
+        hud.style.display="block";
+        hud.textContent = toISO(rows[i].date) + " • " + rows[i].close.toFixed(2);
+      }
+
+      if(dot){
+        const sig = dot.role==="entry"
+          ? STATE.signals.find(s=>s.triggerIndex===dot.idx)
+          : STATE.signals.find(s=>s.endIndex===dot.idx);
+        if(sig){
+          const bars = Math.max(0, sig.endIndex - sig.triggerIndex);
+          const entryDate = toISO(sig.triggerDate);
+          const exitDate  = toISO(sig.endDate);
+
+          const datesRow =
+            dot.role==="entry"
+              ? `<strong>${entryDate}</strong> - (${exitDate})`
+              : `(${entryDate}) - <strong>${exitDate}</strong>`;
+
+          tip.style.opacity=1;
+          // Ensure main chart uses CSS transform positioning
+          tip.style.transform = "translate(-50%, -120%)";
+          tip.style.left = (dot.px)+"px"; tip.style.top  = (dot.py)+"px";
+          tip.innerHTML =
+            `<div><strong>Dates:</strong> ${datesRow}</div>`+
+            `<div><strong>Trigger:</strong> ${sig.triggerClose.toFixed(2)}</div>`+
+            `<div><strong>Exit:</strong> ${sig.endClose.toFixed(2)} (${bars} bars)</div>`+
+            `<div><strong>Return:</strong> <span style="color:${sig.fwdRet>=0?COL.green:COL.red}">${fmtPct(sig.fwdRet)}</span></div>`+
+            `<div><strong>Type:</strong> ${sig.kind}</div>`+
+            `<div><strong>EType:</strong> ${sig.exitType||"horizon"}</div>`;
+          return;
+        }
+      }
+      // non-dot tooltip
+      tip.style.opacity=1;
+      // Ensure main chart uses CSS transform positioning
+      tip.style.transform = "translate(-50%, -120%)";
+      if(chart.pointer){ tip.style.left=chart.pointer.x+"px"; tip.style.top=chart.pointer.y+"px"; }
+      let tooltipContent = (relOn ? ("Rel: "+(displayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2)));
+      if(sma && sma[i]!=null){
+        if(relOn){
+          // Rebase SMA to first visible index for tooltip consistency
+          const [a] = chart.visibleRange();
+          const baseSMA = sma[a] ?? 0;
+          const rebasedSMA = ((1+(sma[i]??0))/(1+(baseSMA??0))) - 1;
+          tooltipContent += " • SMA: "+(rebasedSMA*100).toFixed(2)+"%";
+        }else{
+          tooltipContent += " • SMA: "+sma[i].toFixed(2);
+        }
+      }
+      tooltipContent += (rows[i].volume!=null ? " • Vol: "+rows[i].volume.toLocaleString() : "");
+      tip.innerHTML = tooltipContent;
+    };
+  }
+
+  function updateSignalsAndMetrics(){
+    const rows=STATE.rows;
+    if(!rows.length){ STATE.signals=[]; $("#sigTable").innerHTML=""; $("#mSignals").textContent="—"; return; }
+
+    const opts={
+      delayDays:+$("#delay").value|0, highestSince:+$("#highestSince").value|0,
+      requireDip:$("#requireDip").checked, onlyBreakout:$("#onlyBreakout").checked, shiftExit:$("#shiftExit").checked,
+      cliffOn:$("#cliffOn").checked, cliffDays:+$("#cliffDays").value|0, cliffPct:+$("#cliffPct").value|0,
+      volumeThreshold:+$("#volumeThreshold").value|0,
+      sma:(+$("#smaPeriod").value|0)>0 ? computeSMA(rows,+$("#smaPeriod").value|0):null,
+      aboveSMA:$("#aboveSMA").checked, belowSMA:$("#belowSMA").checked,
+      smaCrossOn:$("#smaCrossOn").checked, smaCrossEnterPct:+$("#smaCrossEnterPct").value|0, smaCrossExitPct:+$("#smaCrossExitPct").value|0,
+      momentumExit:$("#momentumExit").checked, momDropPct:+($("#momDropPct").value||0), momLookback:+($("#momLookback").value||0),
+      momMaxExtend:+($("#momMaxExtend").value||0)
+    };
+
+    STATE.signals = detectSignals(rows, +$("#window").value|0, +$("#dipPct").value, +$("#horizon").value|0, opts);
+
+    const vals=STATE.signals.map(s=>s.fwdRet), n=vals.length, avg=n?vals.reduce((a,b)=>a+b,0)/n:0;
+    const hit=n? vals.filter(x=>x>0).length/n : 0;
+    const sorted=n?[...vals].sort((a,b)=>a-b):[];
+    const med=n? sorted[Math.floor(n/2)] : 0;
+    const mx=n? sorted[sorted.length-1] : 0, mn=n? sorted[0] : 0;
+    $("#mSignals").textContent=n;
+    $("#mAvg").innerHTML=fmtPctCol(avg);
+    $("#mHit").textContent=n? (100*hit).toFixed(1)+"%":"—";
+    $("#mMed").innerHTML=fmtPctCol(med);
+    $("#mMax").innerHTML=fmtPctCol(mx);
+    $("#mMin").innerHTML=fmtPctCol(mn);
+    $("#sigSummary").textContent = n? (n+" signals • avg "+fmtPct(avg)+" • win "+(100*hit).toFixed(1)+"%") : "—";
+
+    $("#sigTable").innerHTML = n ? STATE.signals.map(s =>
+      "<tr>"+
+        "<td>"+toISO(s.triggerDate)+"</td>"+
+        "<td>"+fmt(s.triggerClose)+"</td>"+
+        "<td>"+toISO(s.endDate)+"</td>"+
+        "<td>"+fmtPctCol(s.fwdRet)+"</td>"+
+        "<td>"+s.kind+"</td>"+
+        "<td>"+(s.exitType||"horizon")+"</td>"+
+      "</tr>"
+    ).join("") : '<tr><td colspan="6" class="muted">No signals.</td></tr>';
+  }
+
+  function updateBacktest(){
+    const useSequential = $("#sequentialTrades").checked;
+    const rows=STATE.rows, sigs=STATE.signals, eq=computeEquitySeries(rows,sigs, useSequential);
+    STATE.equity=eq;
+    if(!eq.length){
+      ["btTotal","btCAGR","btDD","btTrades","btWinRate","btAvgWinLoss","btPF","btSharpe"].forEach(id=>$("#"+id).textContent="—");
+      return;
+    }
+    const base=eq[0].equity, vals=eq.map(x=>x.equity);
+    // Ensure we don't divide by zero
+    const startVal = Math.max(base, 0.0001);
+    const endVal = vals[vals.length-1];
+    const total = endVal > 0 ? endVal/startVal - 1 : -1;
+    const days=(rows[rows.length-1].date-rows[0].date)/(1000*3600*24);
+    const cagr=Math.pow(1+total, 252/Math.max(1,days)) - 1;
+    const dd=maxDrawdown(vals);
+    let trades= useSequential ? sequentialize(sigs) : sigs;
+    // Filter to only trades within data range
+    if(!useSequential){
+      trades = trades.filter((s, idx) =>
+        s.triggerIndex < rows.length && s.endIndex < rows.length &&
+        s.fwdRet !== undefined && s.fwdRet !== null && !isNaN(s.fwdRet)
+      );
+    }
+    const rets=trades.map(s=>s.fwdRet);
+
+    const wins=rets.filter(x=>x>0), losses=rets.filter(x=>x<=0);
+    const winRate=rets.length? wins.length/rets.length : 0;
+    const avgWin=wins.length? wins.reduce((a,b)=>a+b,0)/wins.length : 0;
+    const avgLoss=losses.length? losses.reduce((a,b)=>a+b,0)/losses.length : 0;
+    const pf=(wins.reduce((a,b)=>a+b,0)) / Math.abs(losses.reduce((a,b)=>a+b,0) || 1);
+    const daily=[]; for(let i=1;i<vals.length;i++){ daily.push(vals[i]/vals[i-1]-1); }
+    const mean=daily.reduce((a,b)=>a+b,0)/Math.max(1,daily.length);
+    const vol=Math.sqrt(daily.reduce((a,b)=>a+(b-mean)*(b-mean),0)/Math.max(1,daily.length));
+    const sharpe=vol? (mean/vol)*Math.sqrt(252) : 0;
+
+    const colorPct = x => '<span style="color:'+(x>=0?COL.green:COL.red)+'">'+fmtPct(x)+'</span>';
+    $("#btTotal").innerHTML=colorPct(total);
+    $("#btCAGR").innerHTML=colorPct(cagr);
+    $("#btDD").innerHTML=colorPct(dd);
+    $("#btTrades").textContent=rets.length;
+    $("#btWinRate").textContent=(100*winRate).toFixed(1)+"%";
+    $("#btAvgWinLoss").innerHTML=fmtPct(avgWin)+" / "+fmtPct(avgLoss);
+    $("#btPF").textContent=pf.toFixed(2);
+    $("#btSharpe").textContent=sharpe.toFixed(2);
+
+    // equity chart in %
+    eqChart.setRelative(true);
+    const chartBase = Math.max(base, 0.0001);
+    eqChart.setData({ length:eq.length, date:i=>eq[i].date, value:i=>(eq[i].equity/chartBase - 1), aux:null });
+
+    // Add dots for trades executed in backtest
+    const tradeDots = [];
+    for(const trade of trades) {
+      // Only add dots if the trade indices are within the equity data range
+      if(trade.triggerIndex < eq.length && trade.endIndex < eq.length) {
+        tradeDots.push({idx: trade.triggerIndex, role: "entry", pairIdx: trade.endIndex});
+        tradeDots.push({idx: trade.endIndex, role: "exit", pairIdx: trade.triggerIndex});
+      }
+    }
+    eqChart.setDots(tradeDots);
+    eqChart.onhover=(evt)=>{
+      const {i, dot} = evt || {};
+
+      const hud=$("#equityHud"), tip=$("#tip");
+
+      // Show HUD if we have a valid index
+      if(i !== null && eq[i]){
+        const r=eq[i].equity/chartBase - 1;
+        hud.style.display="block";
+        hud.innerHTML=toISO(eq[i].date)+" • "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
+      } else {
+        hud.style.display="none";
+      }
+
+      // Show trade info on dot hover
+      if(dot){
+        const trade = dot.role==="entry"
+          ? trades.find(t=>t.triggerIndex===dot.idx)
+          : trades.find(t=>t.endIndex===dot.idx);
+        if(trade){
+          const bars = Math.max(0, trade.endIndex - trade.triggerIndex);
+          const entryDate = toISO(trade.triggerDate);
+          const exitDate  = toISO(trade.endDate);
+
+          const datesRow = dot.role==="entry"
+            ? `<strong>${entryDate}</strong> - (${exitDate})`
+            : `(${entryDate}) - <strong>${exitDate}</strong>`;
+
+          // Cross-highlight the main chart
+          const mainDot = chart.dots.find(d => d.idx === dot.idx);
+          if(mainDot){
+            chart.hoverDot = mainDot;
+            chart.render(); // Force main chart to redraw with highlighting
+          }
+
+          tip.style.opacity=1;
+          // For equity chart only: disable default CSS translate so we control exact position
+          tip.style.transform = "none";
+          // Position tooltip relative to the equity chart canvas, close to the dot
+          const canvas = $("#equityChart");
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = (rect.left + dot.px - 300) + "px"; // ~24px to the left of dot
+          tip.style.top  = (rect.top + dot.py - 50) + "px";   // ~8px above
+          tip.innerHTML =
+            `<div><strong>Dates:</strong> ${datesRow}</div>`+
+            `<div><strong>Entry:</strong> ${trade.triggerClose.toFixed(2)}</div>`+
+            `<div><strong>Exit:</strong> ${trade.endClose.toFixed(2)} (${bars} bars)</div>`+
+            `<div><strong>Return:</strong> <span style="color:${trade.fwdRet>=0?COL.green:COL.red}">${fmtPct(trade.fwdRet)}</span></div>`+
+            `<div><strong>Type:</strong> ${trade.kind}</div>`+
+            `<div><strong>EType:</strong> ${trade.exitType||"horizon"}</div>`;
+          return;
+        }
+      }
+
+      // Clear main chart highlighting when not hovering over equity chart dots
+      if(!dot){
+        chart.hoverDot = null;
+        chart.render(); // Clear highlighting in main chart
+      }
+
+      // Non-dot tooltip (only show if we have a valid index)
+      if(i !== null && eq[i]){
+        const r=eq[i].equity/chartBase - 1;
+        tip.style.opacity=1;
+        if(eqChart.pointer){
+          // For equity chart only: disable default CSS translate so we control exact position
+          tip.style.transform = "none";
+          // Position tooltip relative to the equity chart canvas, close to cursor
+          const canvas = $("#equityChart");
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = (rect.left + eqChart.pointer.x - 20) + "px"; // ~20px to the left of cursor
+          tip.style.top  = (rect.top + eqChart.pointer.y - 8) + "px";   // ~8px above
+        }
+        tip.innerHTML = "Equity: "+(r>=0?"+":"")+(100*r).toFixed(2)+"%";
+      } else {
+        tip.style.opacity=0;
+      }
+    };
+  }
+
+  /* ===== Wiring ===== */
+  $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
+  $("#search").addEventListener("input",()=>{ renderSearch($("#searchResults"), filterInstruments($("#search").value), (o)=>{ SELECTED=o; STATE.name=o.name; showSelected("sel",o); $("#searchResults").innerHTML=""; }); });
+  $("#indexSearch").addEventListener("input",()=>{ renderSearch($("#indexResults"), filterInstruments($("#indexSearch").value), (o)=>{ INDEX_SELECTED=o; showSelected("index",o); $("#indexResults").innerHTML=""; }); });
+  $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); });
+  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); });
+
+  $("#fetchBtn").addEventListener("click", async()=>{
+    try{
+      if(!SELECTED) return alert("Pick an instrument.");
+      const key=$("#apiKey").value.trim(); if(!key) return alert("Enter API key.");
+      const from=$("#fromDate").value || "2024-01-01";
+      $("#fetchBtn").disabled=true; $("#fetchBtn").textContent="Fetching…";
+      STATE.rows = await fetchPrices(SELECTED.insId, from, key);
+      STATE.indexRows = INDEX_SELECTED ? await fetchPrices(INDEX_SELECTED.insId, from, key) : [];
+      updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
+    }catch(err){ console.error(err); alert("Fetch failed: "+err.message); }
+    finally{ $("#fetchBtn").disabled=false; $("#fetchBtn").textContent="Fetch prices"; }
+  });
+
+  const ids=["relativeToIndex","window","dipPct","delay","horizon","highestSince","requireDip","onlyBreakout","shiftExit","cliffOn","cliffDays","cliffPct","volumeThreshold","smaPeriod","aboveSMA","belowSMA","autoY","smaCrossOn","smaCrossEnterPct","smaCrossExitPct","momentumExit","momDropPct","momLookback","momMaxExtend","sequentialTrades"];
+  ids.forEach(id=>{
+    const el=$("#"+id);
+    el.addEventListener(el.type==="checkbox"?"change":"input",()=>{
+      if(id==="autoY"){ chart.setAutoY(el.checked); }
+      updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
+    });
+  });
+  $("#lockY").addEventListener("click",()=>{ chart.lockYToCurrent(); $("#autoY").checked=false; });
+  $("#resetY").addEventListener("click",()=>{ chart.resetY(); $("#autoY").checked=true; });
+  $("#resetZoom").addEventListener("click",()=>{ chart.resetZoom(); });
+  $("#runBtn").addEventListener("click",()=>{ updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); });
+
+  // init
+  updateMetricLabels();
+})();
+</script>
+
+
+</body></html>
