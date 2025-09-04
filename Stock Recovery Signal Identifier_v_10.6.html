@@ -49,6 +49,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 /* HUD + tooltip */
 .hud{position:absolute;top:10px;left:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none;pointer-events:none;z-index:10}
 .hud-right{position:absolute;top:10px;right:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none;pointer-events:none;z-index:10}
+.hud-title{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.5);padding:6px 10px;border-radius:8px;border:1px solid var(--grid);font-size:12px;font-weight:700;display:none;pointer-events:none;z-index:10}
 .tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0;z-index:2000}
 /* help */
 .help{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--ink);border-radius:50%;font-size:11px;cursor:help;position:relative}
@@ -228,6 +229,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
       <div id="tip" class="tooltip"></div>
       <div id="hud" class="hud"></div>
       <div id="hudRight" class="hud-right"></div>
+      <div id="hudTitle" class="hud-title"></div>
     </div>
     <div class="card legend">
       <div class="flex">
@@ -883,6 +885,19 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         ctx.strokeStyle="rgba(255,255,255,0.25)";
         const px=this.pointer.x;
         ctx.beginPath(); ctx.moveTo(px,t); ctx.lineTo(px,H-b); ctx.stroke();
+
+        // micro dot at nearest data point (helps mark a new date)
+        const iDot = Math.round(this.px2x(px));
+        if(Number.isFinite(iDot) && iDot>=xa && iDot<=xb){
+          const yVal = this._rebasedVal(iDot, xa);
+          if(Number.isFinite(yVal)){
+            const pdx = this.x2px(iDot), pdy = this.y2px(yVal);
+            ctx.beginPath(); ctx.arc(pdx, pdy, 2.5, 0, Math.PI*2);
+            ctx.fillStyle = "#ffffff";
+            ctx.fill();
+            ctx.lineWidth = 1; ctx.strokeStyle = "#00000088"; ctx.stroke();
+          }
+        }
       }
       ctx.restore();
 
@@ -905,7 +920,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   function renderMainChart(){
     const rows=STATE.rows;
-    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#hudRight").style.display="none"; $("#tip").style.opacity=0; return; }
+    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#hudRight").style.display="none"; $("#hudTitle").style.display="none"; $("#tip").style.opacity=0; return; }
 
     const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
     const rel = relOn ? computeRelativePerformance(rows, STATE.indexRows) : null;
@@ -950,7 +965,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
     // Initial update and keep in sync on every render (pan/zoom)
     updateRightEdgeHud();
-    chart.onrender = updateRightEdgeHud;
+    chart.onrender = ()=>{
+      updateRightEdgeHud();
+      // centered title with instrument name
+      const title = $("#hudTitle");
+      const name = STATE.name || (SELECTED && SELECTED.name) || "—";
+      title.textContent = name;
+      title.style.display = name && name!=="—" ? "block" : "none";
+    };
 
     chart.onhover = (evt)=>{
       const {i, dot} = evt || {};
@@ -1006,30 +1028,40 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       tip.style.transform = "translate(-50%, -120%)";
       if(chart.pointer){ tip.style.left=chart.pointer.x+"px"; tip.style.top=chart.pointer.y+"px"; }
 
-      // Calculate display value for tooltip
-      let tooltipDisplayValue = rows[i].close;
-      if(relOn){
-        // Use precomputed rel[] rebased to first visible index
+      // Enhanced tooltip (no instrument name)
+      const dateStr = toISO(rows[i].date);
+      const volStr = rows[i].volume!=null ? rows[i].volume.toLocaleString() : "—";
+
+      if(!relOn){
+        const closeVal = rows[i].close;
+        const dayChg = (i>0 && rows[i-1] && rows[i-1].close>0) ? (rows[i].close/rows[i-1].close - 1) : null;
+        const smaVal = (sma && sma[i]!=null) ? sma[i] : null; // absolute SMA in non-relative mode
+        tip.innerHTML =
+          `<div><strong>${dateStr}</strong></div>`+
+          `<div>Close: ${closeVal!=null?closeVal.toFixed(2):"—"}</div>`+
+          (smaVal!=null?`<div>SMA: ${smaVal.toFixed(2)}</div>`:"")+
+          `<div>%d: ${dayChg==null?"—":((dayChg>=0?"+":"")+(dayChg*100).toFixed(2)+"%")}</div>`+
+          `<div>Volume: ${volStr}</div>`;
+      } else {
+        // Relative mode: Rel (rebased to leftmost visible), Volume, instrument day %, index day %
         const [a] = chart.visibleRange();
         const baseRel = rel[a] ?? 0;
         const curRel  = rel[i] ?? 0;
-        tooltipDisplayValue = ((1+curRel)/(1+baseRel)) - 1;
+        const rebased = ((1+curRel)/(1+baseRel)) - 1;
+        const instrDay = (i>0 && rows[i-1] && rows[i-1].close>0) ? (rows[i].close/rows[i-1].close - 1) : null;
+        // index day change for same date if exists
+        const idxMap = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
+        const k = idxMap.get(dateStr);
+        const indexDay = (k!=null && k>0 && STATE.indexRows[k-1] && STATE.indexRows[k-1].close>0)
+          ? (STATE.indexRows[k].close/STATE.indexRows[k-1].close - 1)
+          : null;
+        tip.innerHTML =
+          `<div><strong>${dateStr}</strong></div>`+
+          `<div>Rel: ${(rebased>=0?"+":"")+(rebased*100).toFixed(2)}%</div>`+
+          `<div>Volume: ${volStr}</div>`+
+          `<div>% instr_day: ${instrDay==null?"—":((instrDay>=0?"+":"")+(instrDay*100).toFixed(2)+"%")}</div>`+
+          `<div>% index_day: ${indexDay==null?"—":((indexDay>=0?"+":"")+(indexDay*100).toFixed(2)+"%")}</div>`;
       }
-
-      let tooltipContent = (relOn ? ("Rel: "+(tooltipDisplayValue*100).toFixed(2)+"%") : ("Close: "+rows[i].close.toFixed(2)));
-      if(sma && sma[i]!=null){
-        if(relOn){
-          // Rebase SMA to first visible index for tooltip consistency
-          const [a] = chart.visibleRange();
-          const baseSMA = sma[a] ?? 0;
-          const rebasedSMA = ((1+(sma[i]??0))/(1+(baseSMA??0))) - 1;
-          tooltipContent += " • SMA: "+(rebasedSMA*100).toFixed(2)+"%";
-        }else{
-          tooltipContent += " • SMA: "+sma[i].toFixed(2);
-        }
-      }
-      tooltipContent += (rows[i].volume!=null ? " • Vol: "+rows[i].volume.toLocaleString() : "");
-      tip.innerHTML = tooltipContent;
     };
   }
 
