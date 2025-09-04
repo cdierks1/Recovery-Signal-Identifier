@@ -271,7 +271,6 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 (function(){
   /* ===== Utils ===== */
   const $ = s => document.querySelector(s);
-  const $$ = s => Array.from(document.querySelectorAll(s));
   const toISO = d => d.toISOString().slice(0,10);
   const parseDate = s => new Date(s);
   const CSS = getComputedStyle(document.documentElement);
@@ -309,15 +308,12 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
   }
   function maxDrawdown(vals){
     if(!vals.length) return 0;
-    let peak = vals[0] || 0.0001; // ensure we don't divide by zero
+    let peak = Number.isFinite(vals[0]) && vals[0] > 0 ? vals[0] : 0.0001;
     let dd = 0;
     for(const v of vals){
-      if(v > 0){ // only update peak with positive values
-        peak = Math.max(peak, v);
-      }
-      if(peak > 0){
-        dd = Math.min(dd, v/peak - 1);
-      }
+      if(!Number.isFinite(v)) continue;
+      if(v > 0) peak = Math.max(peak, v);
+      if(peak > 0) dd = Math.min(dd, v/peak - 1);
     }
     return dd;
   }
@@ -362,10 +358,11 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
   }
   function renderSearch(el, results, onPick){
     el.innerHTML = results.map(o=>'<div class="item" data-id="'+o.insId+'"><strong>'+(o.ticker||"")+'</strong> — '+o.name+'</div>').join("");
+    const map = new Map(results.map(o=>[Number(o.insId), o]));
     el.querySelectorAll(".item").forEach(it=>{
       it.addEventListener("click",()=>{
-        const id=+it.getAttribute("data-id");
-        const obj=results.find(x=>+x.insId===id);
+        const id = Number(it.getAttribute("data-id"));
+        const obj = map.get(id);
         onPick(obj);
       });
     });
@@ -411,8 +408,22 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
   }
 
   /* ===== Small helpers for exits ===== */
-  function arrMin(arr,i0,i1){ let m=Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v<m){m=v; idx=i;} } return {v:m,i:idx}; }
-  function arrMax(arr,i0,i1){ let m=-Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v>m){m=v; idx=i;} } return {v:m,i:idx}; }
+  const PRECOMP = new WeakMap();
+  function precomputeSeries(rows){
+    let pc = PRECOMP.get(rows);
+    const last = rows.length ? rows[rows.length-1].date : null;
+    if(pc && pc.len===rows.length && pc.lastDate===last) return pc;
+    const closes  = rows.map(r=>r.close);
+    const lows    = rows.map(r=>r.low ?? r.close);
+    const volumes = rows.map(r=>r.volume ?? null);
+    const volAvg  = rollingAvg(volumes, 50);
+    pc = {closes,lows,volumes,volAvg,len:rows.length,lastDate:last};
+    PRECOMP.set(rows, pc);
+    return pc;
+  }
+
+  function arrMin(arr,i0,i1){ let m=Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v<m){ idx=i; m=v; } } return {v:m,i:idx}; }
+  function arrMax(arr,i0,i1){ let m=-Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v>m){ idx=i; m=v; } } return {v:m,i:idx}; }
 
   // Momentum exit: first exit index at/after horizon where N-day drop >= dropPct,
   // or cap (horizon + maxExtend) if no such drop occurs.
@@ -421,10 +432,13 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
     const hIdx=Math.min(trigIdx+horizon,N-1);
     if(onlyIfPositiveAtHorizon && closes[hIdx] <= closes[trigIdx]) return hIdx;
     const endCap=Math.min(trigIdx + horizon + (maxExtend|0), N-1);
+    if(hIdx >= endCap) return endCap;
+    const thr = -dropPct/100;
     for(let d=hIdx+1; d<=endCap; d++){
-      const look=d-lookback; if(look<trigIdx) continue;
+      const look = Math.max(trigIdx, d - lookback);
+      if(d - lookback < trigIdx) continue;
       const r=closes[d]/closes[look]-1;
-      if(r <= -dropPct/100) return d;
+      if(r <= thr) return d;
     }
     return endCap;
   }
@@ -438,11 +452,11 @@ function cliffExitIndex(closes, lows, fromIdx, toIdx, lookback, dropPct){
   const thr = -dropPct / 100;
   for (let j = fromIdx + 1; j <= toIdx; j++){
     const start = Math.max(fromIdx, j - lookback);
-    if (start > j - 1) continue; // need at least 1 prior bar
+    if (start >= j) continue; // need at least 1 prior bar
 
     // highest close in prior window
     let hiPrev = -Infinity;
-    for (let k = start; k <= j - 1; k++){
+    for (let k = start; k < j; k++){
       const ck = closes[k];
       if (ck > hiPrev) hiPrev = ck;
     }
@@ -458,10 +472,7 @@ function cliffExitIndex(closes, lows, fromIdx, toIdx, lookback, dropPct){
 /* ===== Signals ===== */
 function detectSignals(rows, windowDays, dipPct, horizon, opts){
   const N = rows.length; if (!N) return [];
-  const closes  = rows.map(r => r.close);
-  const lows    = rows.map(r => r.low ?? r.close);
-  const volumes = rows.map(r => r.volume ?? null);
-  const volAvg  = rollingAvg(volumes, 50);
+  const {closes, lows, volumes, volAvg} = precomputeSeries(rows);
   const sma     = opts.sma || new Array(N).fill(null);
 
   function passVolume(i){
@@ -643,14 +654,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         // day 0: no prior bar
         if (i === 0){ eq.push({date: rows[i].date, equity: portfolioValue}); continue; }
 
-        const activeIdx = [];
+        let hasActive = false;
         for (let t = 0; t < trades.length; t++){
           const tr = trades[t];
           // must have been open yesterday and still open today
-          if (tr.triggerIndex < i && i <= tr.endIndex) activeIdx.push(t);
+          if (tr.triggerIndex < i && i <= tr.endIndex){ hasActive = true; break; }
         }
 
-        if (activeIdx.length === 0){
+        if (!hasActive){
           eq.push({date: rows[i].date, equity: portfolioValue});
           continue;
         }
@@ -897,7 +908,6 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         const hudRight = $("#hudRight");
         const lastVisibleRow = rows[visibleEnd];
         if(relOn){
-          const rel = computeRelativePerformance(rows, STATE.indexRows);
           const baseRel = rel[visibleStart] ?? 0;
           const lastRel = rel[visibleEnd] ?? 0;
           const rebased = ((1+lastRel)/(1+baseRel)) - 1;
@@ -1000,15 +1010,17 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     const rows=STATE.rows;
     if(!rows.length){ STATE.signals=[]; $("#sigTable").innerHTML=""; $("#mSignals").textContent="—"; return; }
 
+    const v = id => +$("#"+id).value|0, c = id => $("#"+id).checked;
+    const smaPeriodVal = v("smaPeriod");
     const opts={
-      delayDays:+$("#delay").value|0, highestSince:+$("#highestSince").value|0,
-      requireDip:$("#requireDip").checked, onlyBreakout:$("#onlyBreakout").checked, shiftExit:$("#shiftExit").checked,
-      cliffOn:$("#cliffOn").checked, cliffDays:+$("#cliffDays").value|0, cliffPct:+$("#cliffPct").value|0,
-      volumeThreshold:+$("#volumeThreshold").value|0,
-      sma:(+$("#smaPeriod").value|0)>0 ? computeSMA(rows,+$("#smaPeriod").value|0):null,
-      aboveSMA:$("#aboveSMA").checked, belowSMA:$("#belowSMA").checked,
-      smaCrossOn:$("#smaCrossOn").checked, smaCrossEnterPct:+$("#smaCrossEnterPct").value|0, smaCrossExitPct:+$("#smaCrossExitPct").value|0,
-      momentumExit:$("#momentumExit").checked, momDropPct:+($("#momDropPct").value||0), momLookback:+($("#momLookback").value||0),
+      delayDays:v("delay"), highestSince:v("highestSince"),
+      requireDip:c("requireDip"), onlyBreakout:c("onlyBreakout"), shiftExit:c("shiftExit"),
+      cliffOn:c("cliffOn"), cliffDays:v("cliffDays"), cliffPct:v("cliffPct"),
+      volumeThreshold:v("volumeThreshold"),
+      sma: (smaPeriodVal>0) ? computeSMA(rows, smaPeriodVal) : null,
+      aboveSMA:c("aboveSMA"), belowSMA:c("belowSMA"),
+      smaCrossOn:c("smaCrossOn"), smaCrossEnterPct:v("smaCrossEnterPct"), smaCrossExitPct:v("smaCrossExitPct"),
+      momentumExit:c("momentumExit"), momDropPct:+($("#momDropPct").value||0), momLookback:+($("#momLookback").value||0),
       momMaxExtend:+($("#momMaxExtend").value||0)
     };
 
