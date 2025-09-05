@@ -84,38 +84,40 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         </div>
         <div id="instrStatus" class="muted" style="margin-top:6px">No file loaded. Expected key: <code>instruments</code>.</div>
       </div>
-    </details><div class="card">
-      <div class="row"><strong>Instrument search</strong></div>
-      <input id="search" type="text" placeholder="Search name / ticker…">
-      <div id="searchResults" class="list" style="margin-top:6px"></div>
-      <div class="grid3" style="margin-top:8px">
-        <div id="selName" class="pill">—</div>
-        <div id="selTicker" class="pill">—</div>
-        <div id="selInsId" class="pill">—</div>
-      </div>
+    </details><details class="card" open="">
+      <summary><span class="chev"></span> Instruments search</summary>
+      <div class="body">
+        <input id="search" type="text" placeholder="Search name / ticker…">
+        <div id="searchResults" class="list" style="margin-top:6px"></div>
+        <div class="grid3" style="margin-top:8px">
+          <div id="selName" class="pill">—</div>
+          <div id="selTicker" class="pill">—</div>
+          <div id="selInsId" class="pill">—</div>
+        </div>
 
-      <div class="row" style="margin-top:10px"><strong>Benchmark (index) search</strong></div>
-      <input id="indexSearch" type="text" placeholder="Search index…">
-      <div id="indexResults" class="list" style="margin-top:6px"></div>
-      <div class="grid3" style="margin-top:8px">
-        <div id="indexSelName" class="pill">—</div>
-        <div id="indexSelTicker" class="pill">—</div>
-        <div id="indexSelInsId" class="pill">—</div>
-      </div>
+        <div class="row" style="margin-top:10px"><strong>Benchmark (index) search</strong></div>
+        <input id="indexSearch" type="text" placeholder="Search index…">
+        <div id="indexResults" class="list" style="margin-top:6px"></div>
+        <div class="grid3" style="margin-top:8px">
+          <div id="indexSelName" class="pill">—</div>
+          <div id="indexSelTicker" class="pill">—</div>
+          <div id="indexSelInsId" class="pill">—</div>
+        </div>
 
-      <div class="row" style="margin-top:10px">
-        <button id="fetchBtn">Fetch prices</button>
-        <div>
-            <label>From date</label>
-            <input id="fromDate" type="date" value="2024-01-01">
-          </div><button id="clearSel" class="ghost">Clear instrument</button>
-        <button id="clearIndexSel" class="ghost">Clear index</button>
+        <div class="row" style="margin-top:10px">
+          <button id="fetchBtn">Fetch prices</button>
+          <div>
+              <label>From date</label>
+              <input id="fromDate" type="date" value="2024-01-01">
+            </div><button id="clearSel" class="ghost">Clear instrument</button>
+          <button id="clearIndexSel" class="ghost">Clear index</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label><input type="checkbox" id="relativeToIndex"> Relative to index</label>
+          <span class="help" data-tip="If checked, the price chart is rebased to the FIRST visible date (0%) and uses % on Y.">?</span>
+        </div>
       </div>
-      <div class="row" style="margin-top:10px">
-        <label><input type="checkbox" id="relativeToIndex"> Relative to index</label>
-        <span class="help" data-tip="If checked, the price chart is rebased to the FIRST visible date (0%) and uses % on Y.">?</span>
-      </div>
-    </div>
+    </details>
 
 
 
@@ -187,19 +189,22 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
       </div>
     </details>
 
-    <div class="card">
-      <div class="row">
-        <label><input id="autoY" type="checkbox" checked=""> Auto-scale Y</label>
-        <button id="lockY" class="ghost">Lock Y to current</button>
-        <button id="resetY" class="ghost">Reset Y</button>
-        <button id="resetZoom" class="ghost">Reset zoom</button>
+    <details class="card" open="">
+      <summary><span class="chev"></span> Chart controls</summary>
+      <div class="body">
+        <div class="row">
+          <label><input id="autoY" type="checkbox" checked=""> Auto-scale Y</label>
+          <button id="lockY" class="ghost">Lock Y to current</button>
+          <button id="resetY" class="ghost">Reset Y</button>
+          <button id="resetZoom" class="ghost">Reset zoom</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="runBtn">Run</button>
+          <button id="exportSignals" class="ghost">Export signals CSV</button>
+          <button id="exportPNG" class="ghost">Export chart PNG</button>
+        </div>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button id="runBtn">Run</button>
-        <button id="exportSignals" class="ghost">Export signals CSV</button>
-        <button id="exportPNG" class="ghost">Export chart PNG</button>
-      </div>
-    </div>
+    </details>
 
     <div class="card">
       <div class="grid3">
@@ -1118,6 +1123,26 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     ).join("") : '<tr><td colspan="6" class="muted">No signals.</td></tr>';
   }
 
+  function updateEquityHudRight(){
+    const eq = STATE.equity;
+    if(!eq || !eq.length){
+      $("#equityHudRight").style.display="none";
+      return;
+    }
+    const [eqVisibleStart, eqVisibleEnd] = eqChart.visibleRange();
+    if(eqVisibleEnd >= 0 && eqVisibleEnd < eq.length){
+      const hudRight = $("#equityHudRight");
+      const base = eq[0].equity;
+      const chartBase = Math.max(base, 0.0001);
+      const lastVisibleEquity = eq[eqVisibleEnd].equity;
+      const relValue = (lastVisibleEquity / chartBase) - 1;
+      hudRight.textContent = (relValue >= 0 ? "+" : "") + (relValue * 100).toFixed(2) + "%";
+      hudRight.style.display = "block";
+    } else {
+      $("#equityHudRight").style.display = "none";
+    }
+  }
+
   function updateBacktest(){
     const useSequential = $("#sequentialTrades").checked;
     const rows=STATE.rows, sigs=STATE.signals, eq=computeEquitySeries(rows,sigs, useSequential);
@@ -1184,29 +1209,22 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
     // Set up equity chart title
     eqChart.onrender = ()=>{
-      // Update right-edge HUD with last visible equity point
-      const [eqVisibleStart, eqVisibleEnd] = eqChart.visibleRange();
-    if(eqVisibleEnd >= 0 && eqVisibleEnd < eq.length){
-      const hudRight = $("#equityHudRight");
-      const lastVisibleEquity = eq[eqVisibleEnd].equity;
-      const relValue = (lastVisibleEquity / chartBase) - 1;
-      hudRight.textContent = (relValue >= 0 ? "+" : "") + (relValue * 100).toFixed(2) + "%";
-      hudRight.style.display = "block";
-    } else {
-      $("#equityHudRight").style.display = "none";
-    }
+      updateEquityHudRight();
 
-    // Update equity chart title - always show instrument name only
-    const title = $("#equityHudTitle");
-    const instrumentName = STATE.name || (SELECTED && SELECTED.name) || "—";
+      // Update equity chart title - always show instrument name only
+      const title = $("#equityHudTitle");
+      const instrumentName = STATE.name || (SELECTED && SELECTED.name) || "—";
 
-    if (instrumentName && instrumentName !== "—") {
-      title.textContent = instrumentName;
-      title.style.display = "block";
-    } else {
-      title.style.display = "none";
-    }
+      if (instrumentName && instrumentName !== "—") {
+        title.textContent = instrumentName;
+        title.style.display = "block";
+      } else {
+        title.style.display = "none";
+      }
     };
+
+    // Update HUD immediately after chart setup (for first load)
+    updateEquityHudRight();
 
     eqChart.onhover=(evt)=>{
       const {i, dot} = evt || {};
@@ -1296,7 +1314,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     _recomputeScheduled=true;
     requestAnimationFrame(()=>{
       _recomputeScheduled=false;
-      updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
+      updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); updateEquityHudRight();
     });
   }
   $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
@@ -1329,7 +1347,19 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   $("#lockY").addEventListener("click",()=>{ chart.lockYToCurrent(); $("#autoY").checked=false; });
   $("#resetY").addEventListener("click",()=>{ chart.resetY(); $("#autoY").checked=true; });
   $("#resetZoom").addEventListener("click",()=>{ chart.resetZoom(); });
-  $("#runBtn").addEventListener("click",()=>{ scheduleRecompute(); });
+  $("#runBtn").addEventListener("click",()=>{
+    // Get first visible date from chart and filter data accordingly
+    const [visibleStart] = chart.visibleRange();
+    if (visibleStart > 0 && STATE.rows.length > visibleStart) {
+      // Filter rows to start from first visible date
+      STATE.rows = STATE.rows.slice(visibleStart);
+      // Also filter index rows if they exist
+      if (STATE.indexRows.length > visibleStart) {
+        STATE.indexRows = STATE.indexRows.slice(visibleStart);
+      }
+    }
+    scheduleRecompute();
+  });
 
   // init
   updateMetricLabels();
