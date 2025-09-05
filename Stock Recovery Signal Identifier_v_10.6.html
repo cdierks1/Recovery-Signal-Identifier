@@ -345,7 +345,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
   /* ===== State ===== */
   let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
-  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[] };
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map() };
 
   /* ===== Instruments ===== */
   function mapInstruments(arr){
@@ -1078,9 +1078,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         const curRel  = rel[i] ?? 0;
         const rebased = ((1+curRel)/(1+baseRel)) - 1;
         const instrDay = (i>0 && rows[i-1] && rows[i-1].close>0) ? (rows[i].close/rows[i-1].close - 1) : null;
-        // index day change for same date if exists
-        const idxMap = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
-        const k = idxMap.get(dateStr);
+        // index day change for same date if exists (use cached map)
+        const k = STATE.indexDateToIdx ? STATE.indexDateToIdx.get(dateStr) : undefined;
         const indexDay = (k!=null && k>0 && STATE.indexRows[k-1] && STATE.indexRows[k-1].close>0)
           ? (STATE.indexRows[k].close/STATE.indexRows[k-1].close - 1)
           : null;
@@ -1337,7 +1336,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   $("#search").addEventListener("input",()=>{ renderSearch($("#searchResults"), filterInstruments($("#search").value), (o)=>{ SELECTED=o; STATE.name=o.name; showSelected("sel",o); $("#searchResults").innerHTML=""; }); });
   $("#indexSearch").addEventListener("input",()=>{ renderSearch($("#indexResults"), filterInstruments($("#indexSearch").value), (o)=>{ INDEX_SELECTED=o; showSelected("index",o); $("#indexResults").innerHTML=""; }); });
   $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; STATE.originalRows=[]; scheduleRecompute(); });
-  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; STATE.originalIndexRows=[]; scheduleRecompute(); });
+  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; STATE.originalIndexRows=[]; STATE.indexDateToIdx=new Map(); scheduleRecompute(); });
 
   $("#fetchBtn").addEventListener("click", async()=>{
     try{
@@ -1349,6 +1348,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       STATE.indexRows = INDEX_SELECTED ? await fetchPrices(INDEX_SELECTED.insId, from, key) : [];
       STATE.originalRows = [...STATE.rows]; // Store backup of original data
       STATE.originalIndexRows = [...STATE.indexRows];
+      STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
       updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
     }catch(err){ console.error(err); alert("Fetch failed: "+err.message); }
     finally{ $("#fetchBtn").disabled=false; $("#fetchBtn").textContent="Fetch prices"; }
@@ -1369,6 +1369,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     if (STATE.originalRows.length > STATE.rows.length) {
       STATE.rows = [...STATE.originalRows];
       STATE.indexRows = [...STATE.originalIndexRows];
+      STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
       scheduleRecompute();
     } else {
       chart.resetZoom();
@@ -1376,14 +1377,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
   });
   $("#runBtn").addEventListener("click",()=>{
-    // Get first visible date from chart and filter data accordingly
+    // Filter to first visible date, aligning index by date (not by slice)
     const [visibleStart] = chart.visibleRange();
     if (visibleStart > 0 && STATE.rows.length > visibleStart) {
-      // Filter rows to start from first visible date
+      const firstDate = STATE.rows[visibleStart].date;
       STATE.rows = STATE.rows.slice(visibleStart);
-      // Also filter index rows if they exist
-      if (STATE.indexRows.length > visibleStart) {
-        STATE.indexRows = STATE.indexRows.slice(visibleStart);
+      if (STATE.indexRows.length) {
+        STATE.indexRows = STATE.indexRows.filter(r => r.date >= firstDate);
+        STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
       }
     }
     scheduleRecompute();
