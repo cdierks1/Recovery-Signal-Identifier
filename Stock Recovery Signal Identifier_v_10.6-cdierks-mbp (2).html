@@ -345,7 +345,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
   /* ===== State ===== */
   let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
-  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[] };
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—" };
 
   /* ===== Instruments ===== */
   function mapInstruments(arr){
@@ -771,7 +771,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     setAutoY(flag){ this.autoY=!!flag; if(!flag) this.fixedY=this.computeYDomain(); this.render(); }
     lockYToCurrent(){ this.fixedY=this.computeYDomain(); this.autoY=false; this.render(); }
     resetY(){ this.fixedY=null; this.autoY=true; this.render(); }
-    resetZoom(){ if(this.series && this.series.length > 0) this.fitXDomain(this.series.length); this.fixedY=null; this.autoY=true; this.render(); }
+    resetZoom(){ if(this.series) this.fitXDomain(this.series.length); this.fixedY=null; this.autoY=true; this.render(); }
     fitXDomain(n){ this.xmin=0; this.xmax=Math.max(1,n-1); }
     visibleRange(){ const n=this.series.length; return [Math.max(0,Math.floor(this.xmin)), Math.min(n-1,Math.ceil(this.xmax))]; }
 
@@ -1336,8 +1336,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
   $("#search").addEventListener("input",()=>{ renderSearch($("#searchResults"), filterInstruments($("#search").value), (o)=>{ SELECTED=o; STATE.name=o.name; showSelected("sel",o); $("#searchResults").innerHTML=""; }); });
   $("#indexSearch").addEventListener("input",()=>{ renderSearch($("#indexResults"), filterInstruments($("#indexSearch").value), (o)=>{ INDEX_SELECTED=o; showSelected("index",o); $("#indexResults").innerHTML=""; }); });
-  $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; STATE.originalRows=[]; scheduleRecompute(); });
-  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; STATE.originalIndexRows=[]; scheduleRecompute(); });
+  $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; scheduleRecompute(); });
+  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; scheduleRecompute(); });
 
   $("#fetchBtn").addEventListener("click", async()=>{
     try{
@@ -1347,8 +1347,6 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       $("#fetchBtn").disabled=true; $("#fetchBtn").textContent="Fetching…";
       STATE.rows = await fetchPrices(SELECTED.insId, from, key);
       STATE.indexRows = INDEX_SELECTED ? await fetchPrices(INDEX_SELECTED.insId, from, key) : [];
-      STATE.originalRows = [...STATE.rows]; // Store backup of original data
-      STATE.originalIndexRows = [...STATE.indexRows];
       updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
     }catch(err){ console.error(err); alert("Fetch failed: "+err.message); }
     finally{ $("#fetchBtn").disabled=false; $("#fetchBtn").textContent="Fetch prices"; }
@@ -1364,17 +1362,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   });
   $("#lockY").addEventListener("click",()=>{ chart.lockYToCurrent(); $("#autoY").checked=false; });
   $("#resetY").addEventListener("click",()=>{ chart.resetY(); $("#autoY").checked=true; });
-  $("#resetZoom").addEventListener("click",()=>{
-    // If data has been filtered by "Run" button, restore original data
-    if (STATE.originalRows.length > STATE.rows.length) {
-      STATE.rows = [...STATE.originalRows];
-      STATE.indexRows = [...STATE.originalIndexRows];
-      scheduleRecompute();
-    } else {
-      chart.resetZoom();
-      $("#autoY").checked=true;
-    }
-  });
+  $("#resetZoom").addEventListener("click",()=>{ chart.resetZoom(); $("#autoY").checked=true; });
   $("#runBtn").addEventListener("click",()=>{
     // Get first visible date from chart and filter data accordingly
     const [visibleStart] = chart.visibleRange();
