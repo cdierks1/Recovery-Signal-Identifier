@@ -538,6 +538,13 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   }
 
   const signals = [];
+  // Track if we've already emitted at least one breakout signal. Used to allow the
+  // very first breakout even when requireDip is enabled; subsequent breakout-only
+  // signals will then require a recovery (dip) first.
+  let hasEmittedBreakout = false;
+  // Track whether there has been a qualifying dip (>= dipPct) since the last breakout
+  // First breakout should be allowed immediately, so initialize to true
+  let dipSinceLastBreakout = true;
 
   // ===== SMA cross strategy =====
   if (opts.smaCrossOn && sma.some(x => x != null)){
@@ -616,12 +623,18 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       if (anchor.i >= 0){
         const minSeg = arrMin(closes, anchor.i, t);
         const drop = minSeg.v / anchor.v - 1;
-        recoveryOK = (drop <= -dipPct/100) && (closes[t] >= anchor.v);
+        const isDipNow = (drop <= -dipPct/100);
+        // Mark that a dip has occurred since last breakout, regardless of recovery
+        if (isDipNow) dipSinceLastBreakout = true;
+        recoveryOK = isDipNow && (closes[t] >= anchor.v);
       }
     }
 
     if ((opts.onlyBreakout && breakoutOK) || (!opts.onlyBreakout && (recoveryOK || breakoutOK))){
-      if (opts.requireDip && !recoveryOK) continue;
+      if (opts.requireDip){
+        const isBreakoutOnly = breakoutOK && !recoveryOK;
+        if (hasEmittedBreakout && isBreakoutOnly && !dipSinceLastBreakout) continue;
+      }
       if (!passVolume(t) || !passSMAFilter(t)) continue;
 
       let trig = t + (opts.delayDays || 0);
@@ -662,6 +675,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         cliff: exitType === "cliff",
         exitType
       });
+      if (breakoutOK){
+        hasEmittedBreakout = true;
+        // After a breakout, require a new dip before any subsequent breakout-only
+        dipSinceLastBreakout = false;
+      }
     }
   }
 
