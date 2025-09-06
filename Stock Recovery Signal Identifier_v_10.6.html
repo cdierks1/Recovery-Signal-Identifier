@@ -85,6 +85,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
           <input id="instrFile" type="file" accept="application/json">
         </div>
         <div id="instrStatus" class="muted" style="margin-top:6px">No file loaded. Expected key: <code>instruments</code>.</div>
+        <div id="envStatus" class="muted" style="margin-top:4px;font-size:11px"></div>
       </div>
     </details><details class="card" open="">
       <summary><span class="chev"></span> Instruments search</summary>
@@ -281,7 +282,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
           <div id="btRangeReturnPerDay" style="font-weight:700">—</div>
         </div>
         <div>
-          <div class="muted">Efficiency vs long hold <span class="help" data-tip="Return/day (invested) ÷ Return/day (visible). >1 means the strategy is more efficient per day than buy-and-hold over the visible range.">?</span></div>
+          <div class="muted">Uplift vs Buy & Hold <span class="help" data-tip="Shows how much better the strategy performs per day compared to buy-and-hold. >1 means better than buy-and-hold over the visible range.">?</span></div>
           <div id="btScenarioVsHold" style="font-weight:700">—</div>
         </div>
       </div>
@@ -1077,17 +1078,17 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       const pctv = (m.perDayVisible>=0?COL.green:COL.red);
       elRangePerDay.innerHTML = `<span style="color:${pctv}">${fmtPct3(m.perDayVisible)}</span> <span class="kpi-subnote muted">over ${m.visibleDays} days</span>`;
     }
-    // Efficiency vs long hold: invPerDay / perDayVisible
-    if(elRatio){
-      if(m.invPerDay==null || m.perDayVisible==null){
+    // Uplift vs B&H: (invPerDay - perDayVisible) / abs(perDayVisible)
+    if (elRatio) {
+      const den = m.perDayVisible;
+      if (m.invPerDay == null || den == null || den === 0) {
         elRatio.textContent = "—";
       } else {
-        const den = m.perDayVisible;
-        const ratio = den!==0 ? (m.invPerDay / den) : null;
-        if(ratio==null || !isFinite(ratio)) elRatio.textContent = "—"; else {
-          const col = ratio>=1 ? COL.green : COL.red;
-          elRatio.innerHTML = `<span style="color:${col}">${ratio.toFixed(2)}x</span>`;
-        }
+        const uplift = (m.invPerDay - den) / Math.abs(den); // e.g., +1.61 = +161% better/day
+        const factor = 1 + uplift;                          // express as "×"
+        const col = uplift >= 0 ? COL.green : COL.red;
+        elRatio.innerHTML = `<span style="color:${col}">${factor.toFixed(2)}x</span>`;
+        elRatio.title = `Per-day uplift vs buy-and-hold; ${(uplift*100).toFixed(0)}% better/day.`;
       }
     }
   }
@@ -1594,8 +1595,105 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     URL.revokeObjectURL(url);
   });
 
+  /* ===== .env Auto-Loading ===== */
+  async function checkAndLoadEnvFile(){
+    const envStatus = $("#envStatus");
+
+    // Check if we're running from file:// protocol
+    if (window.location.protocol === 'file:') {
+      envStatus.textContent = 'File mode: .env loading disabled (use web server for auto-loading)';
+      console.log('Running in file:// mode - .env auto-loading disabled');
+      return;
+    }
+
+    try {
+      // Try to fetch .env file from current directory
+      const response = await fetch('./.env');
+      if (!response.ok) {
+        // .env file doesn't exist or can't be accessed
+        console.log('.env file not found or not accessible');
+        envStatus.textContent = '.env file not found (this is normal)';
+        return;
+      }
+
+      const envContent = await response.text();
+      const envVars = parseEnvContent(envContent);
+
+      let statusMsg = '.env file loaded';
+
+      // Auto-populate API key if found
+      if (envVars.API_KEY) {
+        $("#apiKey").value = envVars.API_KEY;
+        statusMsg += ' • API key set';
+        console.log('API key auto-loaded from .env file');
+      }
+
+      // Auto-load instrument file if specified
+      if (envVars.INSTRUMENT_FILE) {
+        try {
+          const instrResponse = await fetch('./' + envVars.INSTRUMENT_FILE);
+          if (instrResponse.ok) {
+            const instrContent = await instrResponse.text();
+            const json = JSON.parse(instrContent);
+            INSTRUMENTS = mapInstruments(autoDetect(json));
+            $("#instrStatus").textContent = "Auto-loaded " + INSTRUMENTS.length + " instruments from " + envVars.INSTRUMENT_FILE;
+            statusMsg += ' • instruments loaded';
+            console.log('Instruments auto-loaded from .env specified file:', envVars.INSTRUMENT_FILE);
+          } else {
+            $("#instrStatus").textContent = "Failed to load instrument file from .env: " + envVars.INSTRUMENT_FILE;
+            statusMsg += ' • instrument file failed';
+            console.error('Failed to load instrument file specified in .env:', envVars.INSTRUMENT_FILE);
+          }
+        } catch (error) {
+          $("#instrStatus").textContent = "Error parsing instrument file from .env: " + error.message;
+          statusMsg += ' • instrument parse error';
+          console.error('Error loading instrument file from .env:', error);
+        }
+      }
+
+      envStatus.textContent = statusMsg;
+
+    } catch (error) {
+      // .env file not found or other error - this is expected in most cases
+      console.log('.env file check failed (this is normal):', error.message);
+      envStatus.textContent = '.env check failed (browser security)';
+    }
+  }
+
+  function parseEnvContent(content) {
+    const envVars = {};
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+
+      // Skip empty lines and comments
+      if (!trimmedLine || trimmedLine.startsWith('#')) {
+        continue;
+      }
+
+      // Parse KEY=VALUE format
+      const equalIndex = trimmedLine.indexOf('=');
+      if (equalIndex > 0) {
+        const key = trimmedLine.substring(0, equalIndex).trim();
+        let value = trimmedLine.substring(equalIndex + 1).trim();
+
+        // Remove surrounding quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+
+        envVars[key] = value;
+      }
+    }
+
+    return envVars;
+  }
+
   // init
   updateMetricLabels();
+  checkAndLoadEnvFile();
 })();
 </script>
 
