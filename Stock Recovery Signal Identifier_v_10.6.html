@@ -51,6 +51,8 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 .hud-right{position:absolute;top:10px;right:12px;background:rgba(0,0,0,.5);padding:6px 8px;border-radius:8px;border:1px solid var(--grid);font-size:12px;display:none;pointer-events:none;z-index:10}
 .hud-title{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.5);padding:6px 10px;border-radius:8px;border:1px solid var(--grid);font-size:12px;font-weight:700;display:none;pointer-events:none;z-index:10}
 .tooltip{position:absolute;pointer-events:none;background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap;opacity:0;z-index:2000}
+/* small subnote text inside KPI values */
+.kpi-subnote{font-weight:400;font-size:12px}
 /* help */
 .help{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--ink);border-radius:50%;font-size:11px;cursor:help;position:relative}
 .help:hover::after{content:attr(data-tip);position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);background:rgba(20,26,36,.97);border:1px solid var(--grid);padding:8px 10px;border-radius:8px;min-width:200px;max-width:320px;white-space:normal}
@@ -265,6 +267,24 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div><div class="muted">Profit factor</div><div id="btPF" style="font-weight:700">—</div></div>
         <div><div class="muted">Sharpe (ann.)</div><div id="btSharpe" style="font-weight:700">—</div></div>
       </div>
+      <div class="grid4" style="margin-top:8px">
+        <div>
+          <div class="muted">Return/day (invested) <span class="help" data-tip="Geometric mean of daily returns on invested calendar days. Equity forward-filled; first visible day skipped.">?</span></div>
+          <div id="btInvReturnPerDay" style="font-weight:700">—</div>
+        </div>
+        <div>
+          <div class="muted">Stock performance (<span id="btVisibleDates"></span>) <span class="help" data-tip="P[Ve]/P[Vs]-1. If Relative to index is ON: (1+stock)/(1+bench)-1.">?</span></div>
+          <div id="btRangeReturn" style="font-weight:700">—</div>
+        </div>
+        <div>
+          <div class="muted">Return/day (visible range) <span class="help" data-tip="(1+R_vis)^(1/D_visible)-1, where D_visible is inclusive calendar days.">?</span></div>
+          <div id="btRangeReturnPerDay" style="font-weight:700">—</div>
+        </div>
+        <div>
+          <div class="muted">Efficiency vs long hold <span class="help" data-tip="Return/day (invested) ÷ Return/day (visible). >1 means the strategy is more efficient per day than buy-and-hold over the visible range.">?</span></div>
+          <div id="btScenarioVsHold" style="font-weight:700">—</div>
+        </div>
+      </div>
       <div id="equityBox" style="margin-top:10px" class="card">
         <canvas id="equityChart" width="947" height="200"></canvas>
         <div id="equityHud" class="hud"></div>
@@ -345,7 +365,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
   /* ===== State ===== */
   let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
-  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map() };
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map(), version:0 };
 
   /* ===== Instruments ===== */
   function mapInstruments(arr){
@@ -924,6 +944,154 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     $("#labelMin").textContent="Min "+H+"d";
   }
 
+  // Returns [Vs, Ve] Date objects for the main chart's current visible window.
+  // Guards: returns null if no data or fewer than 2 visible points.
+  function getVisibleDateRange(){
+    const rows = STATE.rows;
+    if(!rows || rows.length===0) return null;
+    if(!chart || !chart.series) return null;
+    const [a,b] = chart.visibleRange();
+    const i0 = Math.max(0, Math.min(rows.length-1, a|0));
+    const i1 = Math.max(0, Math.min(rows.length-1, b|0));
+    if(i0===i1) return null; // short window (< 2 points)
+    const Vs = rows[i0]?.date;
+    const Ve = rows[i1]?.date;
+    if(!(Vs instanceof Date) || !(Ve instanceof Date)) return null;
+    return [Vs, Ve];
+  }
+
+  // === Helpers for visible-range KPIs ===
+  const DAY_MS = 24*3600*1000;
+  function denseCalendar(startDate, endDate){
+    const out=[]; if(!(startDate instanceof Date) || !(endDate instanceof Date)) return out;
+    let t=+startDate, e=+endDate; if(t>e) [t,e]=[e,t];
+    for(let x=t; x<=e; x+=DAY_MS){ out.push(new Date(x)); }
+    return out;
+  }
+  function yyIso(d){ return toISO(d).slice(2); } // YY-MM-DD
+  function fmtPct3(x){ return (x>=0?"+":"")+(100*x).toFixed(3)+"%"; }
+  function fmtPctCol3(x){ return '<span style="color:'+(x>=0?COL.green:COL.red)+'">'+fmtPct3(x)+'</span>'; }
+  function priceOnOrBeforeIndex(date){
+    // binary search on STATE.indexRows for largest date <= given
+    const arr = STATE.indexRows; if(!arr || !arr.length) return null;
+    let lo=0, hi=arr.length-1, ans=-1, t=+date;
+    while(lo<=hi){ const mid=(lo+hi)>>1; const dm=+arr[mid].date; if(dm<=t){ ans=mid; lo=mid+1; } else { hi=mid-1; } }
+    return ans>=0 ? arr[ans].close : null;
+  }
+  function buildEquityCalendar(Vs, Ve){
+    const cal = denseCalendar(Vs, Ve);
+    if(!STATE.equity || !STATE.equity.length) return cal.map(d=>({date:d,equity:NaN}));
+    const map = new Map(STATE.equity.map(r=>[toISO(r.date), r.equity]));
+    let last = STATE.equity[0].equity;
+    return cal.map(d=>{
+      const k=toISO(d); if(map.has(k)) last = map.get(k);
+      return {date:d, equity:last};
+    });
+  }
+  function investedMaskAndCount(trades, Vs, Ve){
+    const set = new Set();
+    const pushRange = (a,b)=>{ for(let t=+a; t<=+b; t+=DAY_MS){ set.add(t); } };
+    for(const tr of trades){
+      const s = tr.triggerDate, e = tr.endDate; if(!(s instanceof Date) || !(e instanceof Date)) continue;
+      const a = new Date(Math.max(+s, +Vs)); const b = new Date(Math.min(+e, +Ve));
+      if(+a<=+b) pushRange(a,b);
+    }
+    return { set, count:set.size };
+  }
+
+  function computeVisibleRangeMetrics(){
+    const rng = getVisibleDateRange();
+    if(!rng) return null;
+    const [Vs, Ve] = rng;
+
+    const sequentialOn = $("#sequentialTrades").checked;
+    const baseTrades = sequentialOn ? sequentialize(STATE.signals) : STATE.signals;
+    const { set: investedSet, count: investedDays } = investedMaskAndCount(baseTrades, Vs, Ve);
+
+    // Range return
+    const rows = STATE.rows; if(!rows || !rows.length) return {Vs,Ve, investedDays, invPerDay:null, rangeReturn:null, perDayVisible:null};
+    const [ia, ib] = chart.visibleRange();
+    const i0 = Math.max(0, Math.min(rows.length-1, ia|0));
+    const i1 = Math.max(0, Math.min(rows.length-1, ib|0));
+    const p0 = rows[i0]?.close; const p1 = rows[i1]?.close;
+    let Rvis = (p0>0 && p1>0) ? (p1/p0 - 1) : null;
+    const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    if(relOn && Rvis!=null){
+      const b0 = priceOnOrBeforeIndex(Vs);
+      const b1 = priceOnOrBeforeIndex(Ve);
+      if(b0>0 && b1>0){ const Rbench = b1/b0 - 1; Rvis = (1+Rvis)/(1+Rbench) - 1; }
+    }
+
+    // Per-day (visible)
+    const cal = denseCalendar(Vs, Ve);
+    const Dvis = cal.length;
+    const perDayVis = (Rvis!=null && Dvis>0) ? (Math.pow(1+Rvis, 1/Dvis) - 1) : null;
+
+    // Per-day (invested)
+    const eqCal = buildEquityCalendar(Vs, Ve);
+    let prod = 1, n = 0;
+    for(let i=1;i<eqCal.length;i++){
+      const d = +eqCal[i].date; if(!investedSet.has(d)) continue;
+      const a = eqCal[i-1].equity, b = eqCal[i].equity; if(!(a>0) || !(b>0)) continue;
+      const r = b/a - 1; prod *= (1+r); n++;
+    }
+    const gInv = n>0 ? Math.pow(prod, 1/n) - 1 : null;
+
+    return { Vs, Ve, investedDays, invPerDay: gInv, rangeReturn: Rvis, perDayVisible: perDayVis, visibleDays: Dvis };
+  }
+
+  function updateVisibleRangeKPIs(){
+    const rng = getVisibleDateRange();
+    const elInvPerDay = $("#btInvReturnPerDay");
+    const elRange = $("#btRangeReturn");
+    const elRangePerDay = $("#btRangeReturnPerDay");
+    const elRatio = $("#btScenarioVsHold");
+    const elDates = $("#btVisibleDates");
+    if(!rng){
+      elInvPerDay.textContent = "—"; elRange.textContent = "—"; elRangePerDay.textContent = "—"; if(elRatio) elRatio.textContent = "—"; if(elDates) elDates.textContent = ""; return;
+    }
+    const [Vs, Ve] = rng;
+    const seqOn = $("#sequentialTrades").checked;
+    const relOnFlag = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    if(elDates) elDates.textContent = yyIso(Vs)+" - "+yyIso(Ve);
+    const m = computeVisibleRangeMetrics();
+    if(!m){ elInvPerDay.textContent = "—"; elRange.textContent = "—"; elRangePerDay.textContent = "—"; if(elRatio) elRatio.textContent = "—"; return; }
+    // Return/day (invested) with invested days appended
+    if(m.invPerDay==null || !m.investedDays){
+      elInvPerDay.textContent = "—";
+    } else {
+      const pct = (m.invPerDay>=0?COL.green:COL.red);
+      elInvPerDay.innerHTML = `<span style="color:${pct}">${fmtPct3(m.invPerDay)}</span> <span class="kpi-subnote muted">over ${m.investedDays} days</span>`;
+    }
+    // Stock performance with optional vs index suffix
+    const relOnNow = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    if(m.rangeReturn==null){
+      elRange.textContent = "—";
+    } else {
+      elRange.innerHTML = fmtPctCol(m.rangeReturn) + (relOnNow ? " <span class=\"muted\">vs. index</span>" : "");
+    }
+    // Return/day (visible range) with days count
+    if(m.perDayVisible==null || !m.visibleDays){
+      elRangePerDay.textContent = "—";
+    } else {
+      const pctv = (m.perDayVisible>=0?COL.green:COL.red);
+      elRangePerDay.innerHTML = `<span style="color:${pctv}">${fmtPct3(m.perDayVisible)}</span> <span class="kpi-subnote muted">over ${m.visibleDays} days</span>`;
+    }
+    // Efficiency vs long hold: invPerDay / perDayVisible
+    if(elRatio){
+      if(m.invPerDay==null || m.perDayVisible==null){
+        elRatio.textContent = "—";
+      } else {
+        const den = m.perDayVisible;
+        const ratio = den!==0 ? (m.invPerDay / den) : null;
+        if(ratio==null || !isFinite(ratio)) elRatio.textContent = "—"; else {
+          const col = ratio>=1 ? COL.green : COL.red;
+          elRatio.innerHTML = `<span style="color:${col}">${ratio.toFixed(2)}x</span>`;
+        }
+      }
+    }
+  }
+
   function renderMainChart(){
     const rows=STATE.rows;
     if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#hudRight").style.display="none"; $("#hudTitle").style.display="none"; $("#tip").style.opacity=0; return; }
@@ -1001,6 +1169,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       } else {
         title.style.display = "none";
       }
+      // Update visible-range KPIs on every render
+      updateVisibleRangeKPIs();
     };
 
     chart.onhover = (evt)=>{
@@ -1319,6 +1489,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         tip.style.opacity=0;
       }
     };
+
+    // Invalidate KPI cache version after backtest since STATE.equity changed
+    STATE.version++;
   }
 
   /* ===== Wiring ===== */
@@ -1329,7 +1502,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     _recomputeScheduled=true;
     requestAnimationFrame(()=>{
       _recomputeScheduled=false;
+      // Bump version BEFORE renders so KPI cache invalidates for this frame
+      STATE.version++;
       updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest(); updateEquityHudRight();
+      // Ensure KPIs refresh even if chart.onrender timing skips this frame
+      updateVisibleRangeKPIs();
     });
   }
   $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
@@ -1350,6 +1527,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       STATE.originalIndexRows = [...STATE.indexRows];
       STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
       updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
+      STATE.version++; // invalidate KPI cache on initial load
+      // Ensure KPIs are computed on initial load without waiting for mouse events
+      updateVisibleRangeKPIs();
     }catch(err){ console.error(err); alert("Fetch failed: "+err.message); }
     finally{ $("#fetchBtn").disabled=false; $("#fetchBtn").textContent="Fetch prices"; }
   });
@@ -1362,6 +1542,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       scheduleRecompute();
     });
   });
+  // Also update visible-range KPIs when sequential toggle changes (without full recompute)
+  $("#sequentialTrades").addEventListener("change",()=>{ updateVisibleRangeKPIs(); });
   $("#lockY").addEventListener("click",()=>{ chart.lockYToCurrent(); $("#autoY").checked=false; });
   $("#resetY").addEventListener("click",()=>{ chart.resetY(); $("#autoY").checked=true; });
   $("#resetZoom").addEventListener("click",()=>{
@@ -1388,6 +1570,28 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       }
     }
     scheduleRecompute();
+  });
+
+  // Export equity CSV with summary row
+  $("#exportEquity").addEventListener("click",()=>{
+    if(!STATE.equity || !STATE.equity.length){ alert("No equity to export."); return; }
+    // Build CSV lines from existing equity
+    const lines = ["date,equity"]; 
+    for(const r of STATE.equity){ lines.push(`${toISO(r.date)},${r.equity}`); }
+    // Compute summary metrics using current visible window
+    const m = computeVisibleRangeMetrics();
+    if(m){
+      const fmtOr = v => v==null?"—":(100*v).toFixed(3)+"%"; // keep raw percent numeric formatting in CSV
+      lines.push("");
+      lines.push("Summary");
+      lines.push("visible_start_date,visible_end_date,invested_days_visible,return_per_day_invested,range_return_visible,return_per_day_visible");
+      lines.push(`${toISO(m.Vs)},${toISO(m.Ve)},${m.investedDays||0},${m.invPerDay==null?"":(m.invPerDay)},${m.rangeReturn==null?"":(m.rangeReturn)},${m.perDayVisible==null?"":(m.perDayVisible)}`);
+    }
+    const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "equity.csv"; a.click();
+    URL.revokeObjectURL(url);
   });
 
   // init
