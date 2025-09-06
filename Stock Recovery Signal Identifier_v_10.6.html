@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- saved from url=(0072)http://localhost:8000/Stock%20Recovery%20Signal%20Identifier_v_10.6.html -->
 <html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -71,7 +72,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
     <h2>Stock Recovery Signal Identifier</h2>
     <div class="muted" style="margin-bottom:10px">Analyze dip → recovery and breakout signals with customizable triggers and metrics.</div>
 
-    <details id="dataSrc" class="card" open="">
+    <details id="dataSrc" class="card">
       <summary><span class="chev"></span> Data source &amp; setup <span class="muted" style="font-weight:400">(Börsdata API + local instruments JSON)</span></summary>
       <div class="body">
         <div class="grid2">
@@ -84,8 +85,8 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div class="row" style="margin-top:8px">
           <input id="instrFile" type="file" accept="application/json">
         </div>
-        <div id="instrStatus" class="muted" style="margin-top:6px">No file loaded. Expected key: <code>instruments</code>.</div>
-        <div id="envStatus" class="muted" style="margin-top:4px;font-size:11px"></div>
+        <div id="instrStatus" class="muted" style="margin-top:6px">Loaded 1767 instruments.</div>
+        <div id="envStatus" class="muted" style="margin-top:4px;font-size:11px">.env file loaded • API key set • instrument file failed</div>
       </div>
     </details><details class="card" open="">
       <summary><span class="chev"></span> Instruments search</summary>
@@ -93,18 +94,18 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <input id="search" type="text" placeholder="Search name / ticker…">
         <div id="searchResults" class="list" style="margin-top:6px"></div>
         <div class="grid3" style="margin-top:8px">
-          <div id="selName" class="pill">—</div>
-          <div id="selTicker" class="pill">—</div>
-          <div id="selInsId" class="pill">—</div>
+          <div id="selName" class="pill">AstraZeneca</div>
+          <div id="selTicker" class="pill">AZN</div>
+          <div id="selInsId" class="pill">18</div>
         </div>
 
         <div class="row" style="margin-top:10px"><strong>Benchmark (index) search</strong></div>
         <input id="indexSearch" type="text" placeholder="Search index…">
         <div id="indexResults" class="list" style="margin-top:6px"></div>
         <div class="grid3" style="margin-top:8px">
-          <div id="indexSelName" class="pill">—</div>
-          <div id="indexSelTicker" class="pill">—</div>
-          <div id="indexSelInsId" class="pill">—</div>
+          <div id="indexSelName" class="pill">OMX Stockholm PI</div>
+          <div id="indexSelTicker" class="pill">OMXSPI</div>
+          <div id="indexSelInsId" class="pill">638</div>
         </div>
 
         <div class="row" style="margin-top:10px">
@@ -130,13 +131,13 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div class="grid3">
           <div><label>Recover window (days)</label><input id="window" type="number" min="1" max="60" value="5"></div>
           <div><label>Dip threshold <br>(%)</label><input id="dipPct" type="number" min="0.1" max="10" step="0.1" value="1.5"></div>
-          <div><label>Delay trigger (days)</label><input id="delay" type="number" min="0" max="60" value="0"></div>
-        </div>
+          
+        <div><label>Horizon <br>(days)</label><input id="horizon" type="number" min="3" max="60" value="10"></div></div>
         <div class="grid3" style="margin-top:8px">
-          <div><label>Horizon <br>(days)</label><input id="horizon" type="number" min="3" max="60" value="10"></div>
-          <div><label>Breakout high (days)</label><input id="highestSince" type="number" min="0" max="250" value="0"></div>
+          
+          <div><label>Delay trigger (days)</label><input id="delay" type="number" min="0" max="60" value="0"></div><div><label>Breakout high (days)</label><input id="highestSince" type="number" min="0" max="250" value="0"></div>
           <div class="row" style="align-items:center;margin-top:18px">
-            <label><input id="requireDip" type="checkbox"> Require dip before breakout</label>
+            <label><input id="requireDip" type="checkbox"> Require dip before next breakout</label>
           </div>
         </div>
         <div class="row" style="margin-top:6px">
@@ -211,33 +212,33 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
     <div class="card">
       <div class="grid3">
-        <div><div class="muted">Signals</div><div id="mSignals" style="font-weight:700;font-size:18px">—</div></div>
-        <div><div class="muted" id="labelAvg">Avg 10d</div><div id="mAvg" style="font-weight:700;font-size:18px">—</div></div>
-        <div><div class="muted">Hit rate</div><div id="mHit" style="font-weight:700;font-size:18px">—</div></div>
-        <div><div class="muted" id="labelMed">Med 10d</div><div id="mMed" style="font-weight:700;font-size:18px">—</div></div>
-        <div><div class="muted" id="labelMax">Max 10d</div><div id="mMax" style="font-weight:700;font-size:18px">—</div></div>
-        <div><div class="muted" id="labelMin">Min 10d</div><div id="mMin" style="font-weight:700;font-size:18px">—</div></div>
+        <div><div class="muted">Signals</div><div id="mSignals" style="font-weight:700;font-size:18px">18</div></div>
+        <div><div class="muted" id="labelAvg">Avg 15d</div><div id="mAvg" style="font-weight:700;font-size:18px"><span style="color:#39e29d">+1.20%</span></div></div>
+        <div><div class="muted">Hit rate</div><div id="mHit" style="font-weight:700;font-size:18px">61.1%</div></div>
+        <div><div class="muted" id="labelMed">Med 15d</div><div id="mMed" style="font-weight:700;font-size:18px"><span style="color:#39e29d">+1.86%</span></div></div>
+        <div><div class="muted" id="labelMax">Max 15d</div><div id="mMax" style="font-weight:700;font-size:18px"><span style="color:#39e29d">+9.74%</span></div></div>
+        <div><div class="muted" id="labelMin">Min 15d</div><div id="mMin" style="font-weight:700;font-size:18px"><span style="color:#ff4d4d">-4.74%</span></div></div>
       </div>
     </div>
 
     <div class="card">
-      <div class="row" style="justify-content:space-between"><strong>Signals</strong><span id="sigSummary" class="muted">—</span></div>
+      <div class="row" style="justify-content:space-between"><strong>Signals</strong><span id="sigSummary" class="muted">18 signals • avg +1.20% • win 61.1%</span></div>
       <table>
         <thead>
           <tr><th>Trigger Date</th><th>Trigger</th><th id="thH">+H/Exit</th><th>Return</th><th>Type</th><th>EType</th></tr>
         </thead>
-        <tbody id="sigTable"></tbody>
+        <tbody id="sigTable"><tr><td>2024-01-09</td><td>1&nbsp;423,5</td><td>2024-01-30</td><td><span style="color:#ff4d4d">-1.58%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-01-15</td><td>1&nbsp;424,5</td><td>2024-02-05</td><td><span style="color:#ff4d4d">-2.67%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-03-27</td><td>1&nbsp;448,5</td><td>2024-04-19</td><td><span style="color:#39e29d">+3.18%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-04-11</td><td>1&nbsp;489</td><td>2024-05-03</td><td><span style="color:#39e29d">+9.74%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-04-24</td><td>1&nbsp;543,5</td><td>2024-05-17</td><td><span style="color:#39e29d">+6.48%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-04-25</td><td>1&nbsp;641,5</td><td>2024-05-20</td><td><span style="color:#39e29d">+0.06%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-04-26</td><td>1&nbsp;646</td><td>2024-05-21</td><td><span style="color:#39e29d">+2.58%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-05-21</td><td>1&nbsp;688,5</td><td>2024-06-12</td><td><span style="color:#ff4d4d">-2.16%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-08-13</td><td>1&nbsp;745</td><td>2024-09-03</td><td><span style="color:#39e29d">+2.06%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2024-08-15</td><td>1&nbsp;784,5</td><td>2024-09-05</td><td><span style="color:#ff4d4d">-4.74%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-02-06</td><td>1&nbsp;612,5</td><td>2025-02-27</td><td><span style="color:#39e29d">+1.09%</span></td><td>recovery+breakout</td><td>horizon</td></tr><tr><td>2025-02-13</td><td>1&nbsp;621</td><td>2025-03-06</td><td><span style="color:#ff4d4d">-2.38%</span></td><td>recovery+breakout</td><td>horizon</td></tr><tr><td>2025-02-27</td><td>1&nbsp;630</td><td>2025-03-20</td><td><span style="color:#ff4d4d">-4.60%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-07-29</td><td>1&nbsp;442,5</td><td>2025-08-19</td><td><span style="color:#39e29d">+5.62%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-07-30</td><td>1&nbsp;483</td><td>2025-08-20</td><td><span style="color:#39e29d">+4.25%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-08-14</td><td>1&nbsp;500</td><td>2025-09-04</td><td><span style="color:#39e29d">+3.60%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-08-15</td><td>1&nbsp;505</td><td>2025-09-05</td><td><span style="color:#39e29d">+1.86%</span></td><td>breakout</td><td>horizon</td></tr><tr><td>2025-08-20</td><td>1&nbsp;546</td><td>2025-09-05</td><td><span style="color:#ff4d4d">-0.84%</span></td><td>breakout</td><td>horizon</td></tr></tbody>
       </table>
     </div>
   </aside>
 
   <main class="right">
     <div id="chartBox" class="card">
-      <canvas id="chart" width="973" height="524"></canvas>
-      <div id="tip" class="tooltip"></div>
-      <div id="hud" class="hud"></div>
-      <div id="hudRight" class="hud-right"></div>
-      <div id="hudTitle" class="hud-title"></div>
+      <canvas id="chart" width="1468" height="508"></canvas>
+      <div id="tip" class="tooltip" style="opacity: 0; transform: translate(-50%, -120%); left: 56px; top: 199px;"><div><strong>2024-01-02</strong></div><div>Close: 1390.00</div><div>%d: —</div><div>Volume: 406&nbsp;737</div></div>
+      <div id="hud" class="hud" style="display: none;">2024-01-02 • 1390.00</div>
+      <div id="hudRight" class="hud-right" style="display: block;"><div style="font-weight:700">2025-09-05</div><div>1533.00</div><div>+10.29%</div></div>
+      <div id="hudTitle" class="hud-title" style="display: block;">AstraZeneca</div>
     </div>
     <div class="card legend">
       <div class="flex">
@@ -259,38 +260,38 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         </div>
       </div>
       <div class="grid4" style="margin-top:8px">
-        <div><div class="muted">Total return</div><div id="btTotal" style="font-weight:700">—</div></div>
-        <div><div class="muted">CAGR</div><div id="btCAGR" style="font-weight:700">—</div></div>
-        <div><div class="muted">Max DD</div><div id="btDD" style="font-weight:700">—</div></div>
-        <div><div class="muted">Trades/Signals</div><div id="btTrades" style="font-weight:700">—</div></div>
-        <div><div class="muted">Win rate</div><div id="btWinRate" style="font-weight:700">—</div></div>
-        <div><div class="muted">Avg win / loss</div><div id="btAvgWinLoss" style="font-weight:700">—</div></div>
-        <div><div class="muted">Profit factor</div><div id="btPF" style="font-weight:700">—</div></div>
-        <div><div class="muted">Sharpe (ann.)</div><div id="btSharpe" style="font-weight:700">—</div></div>
+        <div><div class="muted">Total return</div><div id="btTotal" style="font-weight:700"><span style="color:#39e29d">+14.30%</span></div></div>
+        <div><div class="muted">CAGR</div><div id="btCAGR" style="font-weight:700"><span style="color:#39e29d">+5.66%</span></div></div>
+        <div><div class="muted">Max DD</div><div id="btDD" style="font-weight:700"><span style="color:#ff4d4d">-6.29%</span></div></div>
+        <div><div class="muted">Trades/Signals</div><div id="btTrades" style="font-weight:700">8/18</div></div>
+        <div><div class="muted">Win rate</div><div id="btWinRate" style="font-weight:700">62.5%</div></div>
+        <div><div class="muted">Avg win / loss</div><div id="btAvgWinLoss" style="font-weight:700">+3.68% / -1.53%</div></div>
+        <div><div class="muted">Profit factor</div><div id="btPF" style="font-weight:700">4.02</div></div>
+        <div><div class="muted">Sharpe (ann.)</div><div id="btSharpe" style="font-weight:700">0.85</div></div>
       </div>
       <div class="grid4" style="margin-top:8px">
         <div>
           <div class="muted">Return/day (invested) <span class="help" data-tip="Geometric mean of daily returns on invested calendar days. Equity forward-filled; first visible day skipped.">?</span></div>
-          <div id="btInvReturnPerDay" style="font-weight:700">—</div>
+          <div id="btInvReturnPerDay" style="font-weight:700"><span style="color:#39e29d">+0.076%</span> <span class="kpi-subnote muted">over 176 days</span></div>
         </div>
         <div>
-          <div class="muted">Stock performance (<span id="btVisibleDates"></span>) <span class="help" data-tip="P[Ve]/P[Vs]-1. If Relative to index is ON: (1+stock)/(1+bench)-1.">?</span></div>
-          <div id="btRangeReturn" style="font-weight:700">—</div>
+          <div class="muted">Stock performance (<span id="btVisibleDates">24-01-02 - 25-09-05</span>) <span class="help" data-tip="P[Ve]/P[Vs]-1. If Relative to index is ON: (1+stock)/(1+bench)-1.">?</span></div>
+          <div id="btRangeReturn" style="font-weight:700"><span style="color:#39e29d">+10.29%</span></div>
         </div>
         <div>
           <div class="muted">Return/day (visible range) <span class="help" data-tip="(1+R_vis)^(1/D_visible)-1, where D_visible is inclusive calendar days.">?</span></div>
-          <div id="btRangeReturnPerDay" style="font-weight:700">—</div>
+          <div id="btRangeReturnPerDay" style="font-weight:700"><span style="color:#39e29d">+0.016%</span> <span class="kpi-subnote muted">over 613 days</span></div>
         </div>
         <div>
-          <div class="muted">Uplift vs Buy & Hold <span class="help" data-tip="Shows how much better the strategy performs per day compared to buy-and-hold. >1 means better than buy-and-hold over the visible range.">?</span></div>
-          <div id="btScenarioVsHold" style="font-weight:700">—</div>
+          <div class="muted">Uplift vs Buy &amp; Hold <span class="help" data-tip="Shows how much better the strategy performs per day compared to buy-and-hold. &gt;1 means better than buy-and-hold over the visible range.">?</span></div>
+          <div id="btScenarioVsHold" style="font-weight:700" title="Per-day uplift vs buy-and-hold; 376% better/day."><span style="color:#39e29d">4.76x</span></div>
         </div>
       </div>
       <div id="equityBox" style="margin-top:10px" class="card">
-        <canvas id="equityChart" width="947" height="200"></canvas>
-        <div id="equityHud" class="hud"></div>
-        <div id="equityHudRight" class="hud-right"></div>
-        <div id="equityHudTitle" class="hud-title"></div>
+        <canvas id="equityChart" width="1442" height="200"></canvas>
+        <div id="equityHud" class="hud" style="display: none;">2024-02-16 • -1.58%</div>
+        <div id="equityHudRight" class="hud-right" style="display: block;">+14.30%</div>
+        <div id="equityHudTitle" class="hud-title" style="display: block;">AstraZeneca</div>
       </div>
     </div>
   </main>
@@ -1560,14 +1561,20 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
   });
   $("#runBtn").addEventListener("click",()=>{
-    // Filter to first visible date, aligning index by date (not by slice)
-    const [visibleStart] = chart.visibleRange();
-    if (visibleStart > 0 && STATE.rows.length > visibleStart) {
-      const firstDate = STATE.rows[visibleStart].date;
-      STATE.rows = STATE.rows.slice(visibleStart);
-      if (STATE.indexRows.length) {
-        STATE.indexRows = STATE.indexRows.filter(r => r.date >= firstDate);
-        STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
+    // Filter to [first,last] visible dates, aligning index by date (not by slice)
+    const [visibleStart, visibleEnd] = chart.visibleRange();
+    const n = STATE.rows.length;
+    if (n > 0) {
+      const i0 = Math.max(0, Math.min(n - 1, visibleStart|0));
+      const i1 = Math.max(0, Math.min(n - 1, visibleEnd|0));
+      const firstDate = STATE.rows[i0]?.date;
+      const lastDate  = STATE.rows[i1]?.date;
+      if (firstDate && lastDate && (i0 > 0 || i1 < n - 1)) {
+        STATE.rows = STATE.rows.filter(r => r.date >= firstDate && r.date <= lastDate);
+        if (STATE.indexRows.length) {
+          STATE.indexRows = STATE.indexRows.filter(r => r.date >= firstDate && r.date <= lastDate);
+          STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
+        }
       }
     }
     scheduleRecompute();
@@ -1698,4 +1705,4 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 </script>
 
 
-</body></html>
+<div id="refunder-extension-info" data-version="6.7.1" data-extension-id="dopkchfokepnoiannkpahhckocnlhafl" style="display: none;"></div></body></html>
