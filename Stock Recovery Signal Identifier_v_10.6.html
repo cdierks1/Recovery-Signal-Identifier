@@ -131,10 +131,10 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div class="grid3">
           <div><label>Recover window (days)</label><input id="window" type="number" min="1" max="60" value="5"></div>
           <div><label>Dip threshold <br>(%)</label><input id="dipPct" type="number" min="0.1" max="10" step="0.1" value="1.5"></div>
-          
+
         <div><label>Horizon <br>(days)</label><input id="horizon" type="number" min="3" max="60" value="10"></div></div>
         <div class="grid3" style="margin-top:8px">
-          
+
           <div><label>Delay trigger (days)</label><input id="delay" type="number" min="0" max="60" value="0"></div><div><label>Breakout high (days)</label><input id="highestSince" type="number" min="0" max="250" value="0"></div>
           <div class="row" style="align-items:center;margin-top:18px">
             <label><input id="requireDip" type="checkbox"> Require dip before next breakout</label>
@@ -157,7 +157,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div class="card" style="margin-top:8px">
           <div class="row">
             <label><input id="momentumExit" type="checkbox"> Use Momentum based exit</label>
-            <span class="help" data-tip="After Horizon (min hold), keep holding until a drop of ≥ Drop % over the last N days occurs, or until Max extend.">?</span>
+            <span class="help" data-tip="After Horizon (min hold), keep holding until price drops ≥ Drop % below the highest price in the prior N days, or until Max extend.">?</span>
           </div>
           <div class="grid3" style="margin-top:8px">
             <div><label>Drop <br>%</label><input id="momDropPct" type="number" min="0.5" max="50" step="0.1" value="5"></div>
@@ -476,8 +476,8 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
   function arrMin(arr,i0,i1){ let m=Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v<m){ idx=i; m=v; } } return {v:m,i:idx}; }
   function arrMax(arr,i0,i1){ let m=-Infinity,idx=-1; for(let i=i0;i<=i1;i++){ const v=arr[i]; if(v>m){ idx=i; m=v; } } return {v:m,i:idx}; }
 
-  // Momentum exit: first exit index at/after horizon where N-day drop >= dropPct,
-  // or cap (horizon + maxExtend) if no such drop occurs.
+  // Momentum exit: first exit index at/after horizon where price drops >= dropPct
+  // below the highest price in the prior N days, or cap (horizon + maxExtend) if no such drop occurs.
   function momentumExit(closes,trigIdx,horizon,lookback,dropPct,maxExtend=1e9,onlyIfPositiveAtHorizon=false){
     const N=closes.length;
     const hIdx=Math.min(trigIdx+horizon,N-1);
@@ -486,9 +486,14 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
     if(hIdx >= endCap) return endCap;
     const thr = -dropPct/100;
     for(let d=hIdx+1; d<=endCap; d++){
-      const look = Math.max(trigIdx, d - lookback);
-      if(d - lookback < trigIdx) continue;
-      const r=closes[d]/closes[look]-1;
+      // Find the highest price in the lookback window (from trigIdx to d-1)
+      let maxInWindow = -Infinity;
+      const windowStart = Math.max(trigIdx, d - lookback);
+      for(let i=windowStart; i<d; i++){
+        maxInWindow = Math.max(maxInWindow, closes[i]);
+      }
+      // Check if current price is >= dropPct below the window high
+      const r = closes[d]/maxInWindow - 1;
       if(r <= thr) return d;
     }
     return endCap;
@@ -1036,10 +1041,15 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     const p0 = rows[i0]?.close; const p1 = rows[i1]?.close;
     let Rvis = (p0>0 && p1>0) ? (p1/p0 - 1) : null;
     const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
-    if(relOn && Rvis!=null){
+    // Compute benchmark (index) range return over the same visible window
+    let Rbench = null;
+    if(STATE.indexRows && STATE.indexRows.length>0){
       const b0 = priceOnOrBeforeIndex(Vs);
       const b1 = priceOnOrBeforeIndex(Ve);
-      if(b0>0 && b1>0){ const Rbench = b1/b0 - 1; Rvis = (1+Rvis)/(1+Rbench) - 1; }
+      if(b0>0 && b1>0) Rbench = b1/b0 - 1;
+    }
+    if(relOn && Rvis!=null && Rbench!=null){
+      Rvis = (1+Rvis)/(1+Rbench) - 1;
     }
 
     // Per-day (visible)
@@ -1057,7 +1067,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
     const gInv = n>0 ? Math.pow(prod, 1/n) - 1 : null;
 
-    return { Vs, Ve, investedDays, invPerDay: gInv, rangeReturn: Rvis, perDayVisible: perDayVis, visibleDays: Dvis };
+    return { Vs, Ve, investedDays, invPerDay: gInv, rangeReturn: Rvis, perDayVisible: perDayVis, visibleDays: Dvis, benchRangeReturn: Rbench };
   }
 
   function updateVisibleRangeKPIs(){
@@ -1083,12 +1093,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       const pct = (m.invPerDay>=0?COL.green:COL.red);
       elInvPerDay.innerHTML = `<span style="color:${pct}">${fmtPct3(m.invPerDay)}</span> <span class="kpi-subnote muted">over ${m.investedDays} days</span>`;
     }
-    // Stock performance with optional vs index suffix
+    // Stock performance with explicit vs index value when index exists
     const relOnNow = $("#relativeToIndex").checked && STATE.indexRows.length>0;
     if(m.rangeReturn==null){
       elRange.textContent = "—";
     } else {
-      elRange.innerHTML = fmtPctCol(m.rangeReturn) + (relOnNow ? " <span class=\"muted\">vs. index</span>" : "");
+      const stockHtml = fmtPctCol(m.rangeReturn);
+      const benchHtml = (m.benchRangeReturn!=null) ? ` vs index ${fmtPctCol(m.benchRangeReturn)}` : (relOnNow ? " <span class=\"muted\">vs. index</span>" : "");
+      elRange.innerHTML = stockHtml + benchHtml;
     }
     // Return/day (visible range) with days count
     if(m.perDayVisible==null || !m.visibleDays){
@@ -1173,10 +1185,34 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       }
     };
 
+    // Function to update left HUD (top-left) before hover, based on current visible window
+    const updateLeftHudFromVisible = ()=>{
+      const [visibleStart, visibleEnd] = chart.visibleRange();
+      if(visibleEnd >= 0 && visibleEnd < rows.length){
+        const hud = $("#hud");
+        if(relOn){
+          const baseRel = rel[visibleStart] ?? 0;
+          const lastRel = rel[visibleEnd] ?? 0;
+          const rebased = ((1+lastRel)/(1+baseRel)) - 1;
+          hud.style.display = "block";
+          hud.textContent = toISO(rows[visibleEnd].date) + " • " + (rebased*100).toFixed(2) + "%";
+        } else {
+          const lastRow = rows[visibleEnd];
+          hud.style.display = "block";
+          hud.textContent = toISO(lastRow.date) + " • " + lastRow.close.toFixed(2);
+        }
+      } else {
+        $("#hud").style.display = "none";
+      }
+    };
+
     // Initial update and keep in sync on every render (pan/zoom)
     updateRightEdgeHud();
+    updateLeftHudFromVisible();
     chart.onrender = ()=>{
       updateRightEdgeHud();
+      // If not hovering, keep left HUD synced to the last visible bar
+      if(!chart.pointer) updateLeftHudFromVisible();
       // centered title with instrument name or vs format
       const title = $("#hudTitle");
       const instrumentName = STATE.name || (SELECTED && SELECTED.name) || "—";
@@ -1602,7 +1638,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   $("#exportEquity").addEventListener("click",()=>{
     if(!STATE.equity || !STATE.equity.length){ alert("No equity to export."); return; }
     // Build CSV lines from existing equity
-    const lines = ["date,equity"]; 
+    const lines = ["date,equity"];
     for(const r of STATE.equity){ lines.push(`${toISO(r.date)},${r.equity}`); }
     // Compute summary metrics using current visible window
     const m = computeVisibleRangeMetrics();
