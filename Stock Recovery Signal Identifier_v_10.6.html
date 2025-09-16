@@ -18,6 +18,7 @@ aside.left{background:var(--panel);border:1px solid var(--grid);border-radius:12
 main.right{display:grid;grid-template-rows:auto auto 1fr;gap:8px}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:12px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bt-total-badge{font-size:11px;color:var(--green);margin-left:6px;white-space:nowrap}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -301,6 +302,33 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 (function(){
   /* ===== Utils ===== */
   const $ = s => document.querySelector(s);
+  const EL_CACHE=new Map();
+  const byId=id=>{
+    if(!EL_CACHE.has(id)) EL_CACHE.set(id, document.getElementById(id));
+    return EL_CACHE.get(id);
+  };
+  const readValue=id=>{ const el=byId(id); return el?el.value:""; };
+  const asNumber=(raw,fallback)=>{
+    if(raw==null) return fallback;
+    const trimmed=String(raw).trim();
+    if(trimmed==="") return fallback;
+    const v=Number(trimmed);
+    return Number.isFinite(v)?v:fallback;
+  };
+  const readNumber=(id,fallback=0)=>asNumber(readValue(id),fallback);
+  const readInt=(id,fallback=0)=>{
+    const raw=readValue(id);
+    if(raw==null) return fallback;
+    const trimmed=String(raw).trim();
+    if(trimmed==="") return fallback;
+    const v=parseInt(trimmed,10);
+    return Number.isFinite(v)?v:fallback;
+  };
+  const readFloat=(id,fallback=0)=>asNumber(readValue(id),fallback);
+  const readCheck=id=>{ const el=byId(id); return !!(el&&el.checked); };
+  const setText=(id,text)=>{ const el=byId(id); if(el) el.textContent=text; };
+  const setHTML=(id,html)=>{ const el=byId(id); if(el) el.innerHTML=html; };
+  const on=(id,event,handler)=>{ const el=byId(id); if(el) el.addEventListener(event,handler); return el; };
   const toISO = d => d.toISOString().slice(0,10);
   const parseDate = s => new Date(s);
   const CSS = getComputedStyle(document.documentElement);
@@ -367,7 +395,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
   /* ===== State ===== */
   let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
-  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map(), version:0 };
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map(), version:0, backtestTotalReturn:null, visibleRangeMetrics:null };
 
   /* ===== Instruments ===== */
   function mapInstruments(arr){
@@ -962,11 +990,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   /* ===== Rendering & metrics ===== */
   function updateMetricLabels(){
-    const H=+$("#horizon").value|0;
-    $("#labelAvg").textContent="Avg "+H+"d";
-    $("#labelMed").textContent="Med "+H+"d";
-    $("#labelMax").textContent="Max "+H+"d";
-    $("#labelMin").textContent="Min "+H+"d";
+    const horizonDays = readInt("horizon", 0);
+    setText("labelAvg", `Avg ${horizonDays}d`);
+    setText("labelMed", `Med ${horizonDays}d`);
+    setText("labelMax", `Max ${horizonDays}d`);
+    setText("labelMin", `Min ${horizonDays}d`);
   }
 
   // Returns [Vs, Ve] Date objects for the main chart's current visible window.
@@ -1029,7 +1057,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     if(!rng) return null;
     const [Vs, Ve] = rng;
 
-    const sequentialOn = $("#sequentialTrades").checked;
+    const sequentialOn = readCheck("sequentialTrades");
     const baseTrades = sequentialOn ? sequentialize(STATE.signals) : STATE.signals;
     const { set: investedSet, count: investedDays } = investedMaskAndCount(baseTrades, Vs, Ve);
 
@@ -1040,7 +1068,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     const i1 = Math.max(0, Math.min(rows.length-1, ib|0));
     const p0 = rows[i0]?.close; const p1 = rows[i1]?.close;
     let Rvis = (p0>0 && p1>0) ? (p1/p0 - 1) : null;
-    const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    const relOn = readCheck("relativeToIndex") && STATE.indexRows.length>0;
     // Compute benchmark (index) range return over the same visible window
     let Rbench = null;
     if(STATE.indexRows && STATE.indexRows.length>0){
@@ -1070,24 +1098,57 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     return { Vs, Ve, investedDays, invPerDay: gInv, rangeReturn: Rvis, perDayVisible: perDayVis, visibleDays: Dvis, benchRangeReturn: Rbench };
   }
 
+  function updateTotalReturnDisplay(){
+    const el = byId("btTotal");
+    if(!el) return;
+    const total = STATE.backtestTotalReturn;
+    if(total==null || !Number.isFinite(total)){
+      el.textContent = "—";
+      return;
+    }
+    let html = fmtPctCol(total);
+    const metrics = STATE.visibleRangeMetrics;
+    const bench = metrics && typeof metrics.benchRangeReturn === "number" ? metrics.benchRangeReturn : null;
+    if(bench!=null && Number.isFinite(bench) && total > bench){
+      html += ' <span class="bt-total-badge">☑ beat index</span>';
+    }
+    el.innerHTML = html;
+  }
+
   function updateVisibleRangeKPIs(){
     const rng = getVisibleDateRange();
-    const elInvPerDay = $("#btInvReturnPerDay");
-    const elRange = $("#btRangeReturn");
-    const elRangePerDay = $("#btRangeReturnPerDay");
-    const elRatio = $("#btScenarioVsHold");
-    const elDates = $("#btVisibleDates");
+    const elInvPerDay = byId("btInvReturnPerDay");
+    const elRange = byId("btRangeReturn");
+    const elRangePerDay = byId("btRangeReturnPerDay");
+    const elRatio = byId("btScenarioVsHold");
+    const elDates = byId("btVisibleDates");
     if(!rng){
-      elInvPerDay.textContent = "—"; elRange.textContent = "—"; elRangePerDay.textContent = "—"; if(elRatio) elRatio.textContent = "—"; if(elDates) elDates.textContent = ""; return;
+      if(elInvPerDay) elInvPerDay.textContent = "—";
+      if(elRange) elRange.textContent = "—";
+      if(elRangePerDay) elRangePerDay.textContent = "—";
+      if(elRatio) elRatio.textContent = "—";
+      if(elDates) elDates.textContent = "";
+      STATE.visibleRangeMetrics = null;
+      updateTotalReturnDisplay();
+      return;
     }
     const [Vs, Ve] = rng;
-    const seqOn = $("#sequentialTrades").checked;
-    const relOnFlag = $("#relativeToIndex").checked && STATE.indexRows.length>0;
     if(elDates) elDates.textContent = yyIso(Vs)+" - "+yyIso(Ve);
     const m = computeVisibleRangeMetrics();
-    if(!m){ elInvPerDay.textContent = "—"; elRange.textContent = "—"; elRangePerDay.textContent = "—"; if(elRatio) elRatio.textContent = "—"; return; }
+    if(!m){
+      if(elInvPerDay) elInvPerDay.textContent = "—";
+      if(elRange) elRange.textContent = "—";
+      if(elRangePerDay) elRangePerDay.textContent = "—";
+      if(elRatio) elRatio.textContent = "—";
+      STATE.visibleRangeMetrics = null;
+      updateTotalReturnDisplay();
+      return;
+    }
+    STATE.visibleRangeMetrics = m;
     // Return/day (invested) with invested days appended
-    if(m.invPerDay==null || !m.investedDays){
+    if(!elInvPerDay){
+      // nothing
+    } else if(m.invPerDay==null || !m.investedDays){
       elInvPerDay.textContent = "—";
     } else {
       const pct = (m.invPerDay>=0?COL.green:COL.red);
@@ -1095,7 +1156,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     }
     // Stock performance with explicit vs index value when index exists
     const relOnNow = $("#relativeToIndex").checked && STATE.indexRows.length>0;
-    if(m.rangeReturn==null){
+    if(!elRange){
+      // nothing
+    } else if(m.rangeReturn==null){
       elRange.textContent = "—";
     } else {
       const stockHtml = fmtPctCol(m.rangeReturn);
@@ -1103,7 +1166,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       elRange.innerHTML = stockHtml + benchHtml;
     }
     // Return/day (visible range) with days count
-    if(m.perDayVisible==null || !m.visibleDays){
+    if(!elRangePerDay){
+      // nothing
+    } else if(m.perDayVisible==null || !m.visibleDays){
       elRangePerDay.textContent = "—";
     } else {
       const pctv = (m.perDayVisible>=0?COL.green:COL.red);
@@ -1122,16 +1187,25 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
         elRatio.title = `Per-day uplift vs buy-and-hold; ${(uplift*100).toFixed(0)}% better/day.`;
       }
     }
+    updateTotalReturnDisplay();
   }
 
   function renderMainChart(){
     const rows=STATE.rows;
-    if(!rows.length){ chart.setData(null); $("#hud").style.display="none"; $("#hudRight").style.display="none"; $("#hudTitle").style.display="none"; $("#tip").style.opacity=0; return; }
+    const hud=byId("hud"), hudRight=byId("hudRight"), hudTitle=byId("hudTitle"), tip=byId("tip");
+    if(!rows.length){
+      chart.setData(null);
+      if(hud) hud.style.display="none";
+      if(hudRight) hudRight.style.display="none";
+      if(hudTitle) hudTitle.style.display="none";
+      if(tip) tip.style.opacity=0;
+      return;
+    }
 
-    const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+    const relOn = readCheck("relativeToIndex") && STATE.indexRows.length>0;
     const rel = relOn ? computeRelativePerformance(rows, STATE.indexRows) : null;
 
-    const smaPeriod = +$("#smaPeriod").value|0;
+    const smaPeriod = readInt("smaPeriod", 0);
     const sma = smaPeriod>0 ? (relOn ? computeSMAArray(rel, smaPeriod) : computeSMA(rows, smaPeriod)) : null;
 
     chart.setRelative(relOn);
@@ -1152,8 +1226,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     // Function to update right-edge HUD based on current visible window
     const updateRightEdgeHud = ()=>{
       const [visibleStart, visibleEnd] = chart.visibleRange();
-      if(visibleEnd >= 0 && visibleEnd < rows.length){
-        const hudRight = $("#hudRight");
+      if(visibleEnd >= 0 && visibleEnd < rows.length && hudRight){
         const lastVisibleRow = rows[visibleEnd];
         const firstVisibleRow = rows[visibleStart];
 
@@ -1181,15 +1254,14 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
         hudRight.style.display = "block";
       } else {
-        $("#hudRight").style.display = "none";
+        if(hudRight) hudRight.style.display = "none";
       }
     };
 
     // Function to update left HUD (top-left) before hover, based on current visible window
     const updateLeftHudFromVisible = ()=>{
       const [visibleStart, visibleEnd] = chart.visibleRange();
-      if(visibleEnd >= 0 && visibleEnd < rows.length){
-        const hud = $("#hud");
+      if(visibleEnd >= 0 && visibleEnd < rows.length && hud){
         if(relOn){
           const baseRel = rel[visibleStart] ?? 0;
           const lastRel = rel[visibleEnd] ?? 0;
@@ -1202,7 +1274,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
           hud.textContent = toISO(lastRow.date) + " • " + lastRow.close.toFixed(2);
         }
       } else {
-        $("#hud").style.display = "none";
+        if(hud) hud.style.display = "none";
       }
     };
 
@@ -1214,16 +1286,15 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       // If not hovering, keep left HUD synced to the last visible bar
       if(!chart.pointer) updateLeftHudFromVisible();
       // centered title with instrument name or vs format
-      const title = $("#hudTitle");
       const instrumentName = STATE.name || (SELECTED && SELECTED.name) || "—";
       const indexName = INDEX_SELECTED && INDEX_SELECTED.name ? INDEX_SELECTED.name : "Index";
-      const relOn = $("#relativeToIndex").checked && STATE.indexRows.length>0;
+      const relMode = readCheck("relativeToIndex") && STATE.indexRows.length>0;
 
-      if (instrumentName && instrumentName !== "—") {
-        title.textContent = relOn ? `${instrumentName} -vs- ${indexName}` : instrumentName;
-        title.style.display = "block";
-      } else {
-        title.style.display = "none";
+      if (hudTitle && instrumentName && instrumentName !== "—") {
+        hudTitle.textContent = relMode ? `${instrumentName} -vs- ${indexName}` : instrumentName;
+        hudTitle.style.display = "block";
+      } else if(hudTitle){
+        hudTitle.style.display = "none";
       }
       // Update visible-range KPIs on every render
       updateVisibleRangeKPIs();
@@ -1231,7 +1302,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
     chart.onhover = (evt)=>{
       const {i, dot} = evt || {};
-      const hud=$("#hud"), tip=$("#tip");
+      if(!hud || !tip){ return; }
       if(i==null || !rows[i]){ hud.style.display="none"; tip.style.opacity=0; return; }
 
       // HUD (rebased if relative)
@@ -1319,79 +1390,134 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     };
   }
 
+  function buildSignalOptions(rows){
+    const smaPeriod = readInt("smaPeriod", 0);
+    return {
+      delayDays:readInt("delay",0),
+      highestSince:readInt("highestSince",0),
+      requireDip:readCheck("requireDip"),
+      onlyBreakout:readCheck("onlyBreakout"),
+      shiftExit:readCheck("shiftExit"),
+      cliffOn:readCheck("cliffOn"),
+      cliffDays:readInt("cliffDays",0),
+      cliffPct:readFloat("cliffPct",0),
+      volumeThreshold:readFloat("volumeThreshold",0),
+      sma:(smaPeriod>0)?computeSMA(rows, smaPeriod):null,
+      aboveSMA:readCheck("aboveSMA"),
+      belowSMA:readCheck("belowSMA"),
+      smaCrossOn:readCheck("smaCrossOn"),
+      smaCrossEnterPct:readFloat("smaCrossEnterPct",0),
+      smaCrossExitPct:readFloat("smaCrossExitPct",0),
+      momentumExit:readCheck("momentumExit"),
+      momDropPct:readFloat("momDropPct",0),
+      momLookback:readInt("momLookback",0),
+      momMaxExtend:readInt("momMaxExtend",0)
+    };
+  }
+
+  function computeSignalStats(signals){
+    const returns = signals.map(s=>s.fwdRet);
+    const count = returns.length;
+    if(!count){
+      return {count:0, avg:0, median:0, min:0, max:0, hitRate:null};
+    }
+    const sum = returns.reduce((acc,val)=>acc+val,0);
+    const sorted=[...returns].sort((a,b)=>a-b);
+    const median=sorted[Math.floor(count/2)];
+    const min=sorted[0];
+    const max=sorted[sorted.length-1];
+    const hitRate=returns.filter(x=>x>0).length/count;
+    return {count, avg:sum/count, median, min, max, hitRate};
+  }
+
+  function renderSignalKPIs(signals){
+    const stats = computeSignalStats(signals);
+    setText("mSignals", stats.count ? String(stats.count) : "0");
+    setHTML("mAvg", fmtPctCol(stats.avg));
+    setText("mHit", stats.hitRate==null?"—":`${(100*stats.hitRate).toFixed(1)}%`);
+    setHTML("mMed", fmtPctCol(stats.median));
+    setHTML("mMax", fmtPctCol(stats.max));
+    setHTML("mMin", fmtPctCol(stats.min));
+    const summary = stats.count
+      ? `${stats.count} signals • avg ${fmtPct(stats.avg)} • win ${(100*(stats.hitRate||0)).toFixed(1)}%`
+      : "—";
+    setText("sigSummary", summary);
+  }
+
+  function renderSignalsTable(signals, tableEl){
+    if(!tableEl) return;
+    if(!signals.length){
+      tableEl.innerHTML = '<tr><td colspan="6" class="muted">No signals.</td></tr>';
+      return;
+    }
+    const rowsHtml = signals.map(s =>
+      `<tr>`+
+        `<td>${toISO(s.triggerDate)}</td>`+
+        `<td>${fmt(s.triggerClose)}</td>`+
+        `<td>${toISO(s.endDate)}</td>`+
+        `<td>${fmtPctCol(s.fwdRet)}</td>`+
+        `<td>${s.kind}</td>`+
+        `<td>${s.exitType||"horizon"}</td>`+
+      `</tr>`
+    ).join("");
+    tableEl.innerHTML = rowsHtml;
+  }
+
   function updateSignalsAndMetrics(){
     const rows=STATE.rows;
-    if(!rows.length){ STATE.signals=[]; $("#sigTable").innerHTML=""; $("#mSignals").textContent="—"; return; }
+    const tableEl = byId("sigTable");
+    if(!rows.length){
+      STATE.signals=[];
+      if(tableEl) tableEl.innerHTML="";
+      setText("mSignals", "—");
+      setHTML("mAvg", "—");
+      setText("mHit", "—");
+      setHTML("mMed", "—");
+      setHTML("mMax", "—");
+      setHTML("mMin", "—");
+      setText("sigSummary", "—");
+      return;
+    }
 
-    const v = id => +$("#"+id).value|0, c = id => $("#"+id).checked;
-    const smaPeriodVal = v("smaPeriod");
-    const opts={
-      delayDays:v("delay"), highestSince:v("highestSince"),
-      requireDip:c("requireDip"), onlyBreakout:c("onlyBreakout"), shiftExit:c("shiftExit"),
-      cliffOn:c("cliffOn"), cliffDays:v("cliffDays"), cliffPct:v("cliffPct"),
-      volumeThreshold:v("volumeThreshold"),
-      sma: (smaPeriodVal>0) ? computeSMA(rows, smaPeriodVal) : null,
-      aboveSMA:c("aboveSMA"), belowSMA:c("belowSMA"),
-      smaCrossOn:c("smaCrossOn"), smaCrossEnterPct:v("smaCrossEnterPct"), smaCrossExitPct:v("smaCrossExitPct"),
-      momentumExit:c("momentumExit"), momDropPct:+($("#momDropPct").value||0), momLookback:+($("#momLookback").value||0),
-      momMaxExtend:+($("#momMaxExtend").value||0)
-    };
+    const windowDays = readInt("window", 0);
+    const dipPct = readFloat("dipPct", 0);
+    const horizon = readInt("horizon", 0);
+    const opts = buildSignalOptions(rows);
 
-    STATE.signals = detectSignals(rows, +$("#window").value|0, +$("#dipPct").value, +$("#horizon").value|0, opts);
+    STATE.signals = detectSignals(rows, windowDays, dipPct, horizon, opts);
 
-    const vals=STATE.signals.map(s=>s.fwdRet), n=vals.length, avg=n?vals.reduce((a,b)=>a+b,0)/n:0;
-    const hit=n? vals.filter(x=>x>0).length/n : 0;
-    const sorted=n?[...vals].sort((a,b)=>a-b):[];
-    const med=n? sorted[Math.floor(n/2)] : 0;
-    const mx=n? sorted[sorted.length-1] : 0, mn=n? sorted[0] : 0;
-    $("#mSignals").textContent=n;
-    $("#mAvg").innerHTML=fmtPctCol(avg);
-    $("#mHit").textContent=n? (100*hit).toFixed(1)+"%":"—";
-    $("#mMed").innerHTML=fmtPctCol(med);
-    $("#mMax").innerHTML=fmtPctCol(mx);
-    $("#mMin").innerHTML=fmtPctCol(mn);
-    $("#sigSummary").textContent = n? (n+" signals • avg "+fmtPct(avg)+" • win "+(100*hit).toFixed(1)+"%") : "—";
-
-    $("#sigTable").innerHTML = n ? STATE.signals.map(s =>
-      "<tr>"+
-        "<td>"+toISO(s.triggerDate)+"</td>"+
-        "<td>"+fmt(s.triggerClose)+"</td>"+
-        "<td>"+toISO(s.endDate)+"</td>"+
-        "<td>"+fmtPctCol(s.fwdRet)+"</td>"+
-        "<td>"+s.kind+"</td>"+
-        "<td>"+(s.exitType||"horizon")+"</td>"+
-      "</tr>"
-    ).join("") : '<tr><td colspan="6" class="muted">No signals.</td></tr>';
+    renderSignalKPIs(STATE.signals);
+    renderSignalsTable(STATE.signals, tableEl);
   }
 
   function updateEquityHudRight(){
     const eq = STATE.equity;
-    if(!eq || !eq.length){
-      $("#equityHudRight").style.display="none";
-      return;
-    }
-    const [eqVisibleStart, eqVisibleEnd] = eqChart.visibleRange();
+    const hud = byId("equityHudRight");
+    if(!hud) return;
+    if(!eq || !eq.length){ hud.style.display="none"; return; }
+    const [, eqVisibleEnd] = eqChart.visibleRange();
     if(eqVisibleEnd >= 0 && eqVisibleEnd < eq.length){
-      const hudRight = $("#equityHudRight");
       const base = eq[0].equity;
       const chartBase = Math.max(base, 0.0001);
       const lastVisibleEquity = eq[eqVisibleEnd].equity;
       const relValue = (lastVisibleEquity / chartBase) - 1;
-      hudRight.textContent = (relValue >= 0 ? "+" : "") + (relValue * 100).toFixed(2) + "%";
-      hudRight.style.display = "block";
+      hud.textContent = (relValue >= 0 ? "+" : "") + (relValue * 100).toFixed(2) + "%";
+      hud.style.display = "block";
     } else {
-      $("#equityHudRight").style.display = "none";
+      hud.style.display = "none";
     }
   }
 
   function updateBacktest(){
-    const useSequential = $("#sequentialTrades").checked;
+    const useSequential = readCheck("sequentialTrades");
     const rows=STATE.rows, sigs=STATE.signals, eq=computeEquitySeries(rows,sigs, useSequential);
     STATE.equity=eq;
     if(!eq.length){
-      ["btTotal","btCAGR","btDD","btWinRate","btAvgWinLoss","btPF","btSharpe"].forEach(id=>$("#"+id).textContent="—");
-      $("#btTrades").textContent="0/" + (sigs.length || 0);
-      $("#equityHudRight").style.display="none";
+      ["btTotal","btCAGR","btDD","btWinRate","btAvgWinLoss","btPF","btSharpe"].forEach(id=>setText(id,"—"));
+      setText("btTrades","0/" + (sigs.length || 0));
+      const hud=byId("equityHudRight"); if(hud) hud.style.display="none";
+      STATE.backtestTotalReturn = null;
+      updateTotalReturnDisplay();
       return;
     }
     const base=eq[0].equity, vals=eq.map(x=>x.equity);
@@ -1422,15 +1548,15 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     const vol=Math.sqrt(daily.reduce((a,b)=>a+(b-mean)*(b-mean),0)/Math.max(1,daily.length));
     const sharpe=vol? (mean/vol)*Math.sqrt(252) : 0;
 
-    const colorPct = x => '<span style="color:'+(x>=0?COL.green:COL.red)+'">'+fmtPct(x)+'</span>';
-    $("#btTotal").innerHTML=colorPct(total);
-    $("#btCAGR").innerHTML=colorPct(cagr);
-    $("#btDD").innerHTML=colorPct(dd);
-    $("#btTrades").textContent=rets.length + "/" + sigs.length;
-    $("#btWinRate").textContent=(100*winRate).toFixed(1)+"%";
-    $("#btAvgWinLoss").innerHTML=fmtPct(avgWin)+" / "+fmtPct(avgLoss);
-    $("#btPF").textContent=pf.toFixed(2);
-    $("#btSharpe").textContent=sharpe.toFixed(2);
+    STATE.backtestTotalReturn = total;
+    updateTotalReturnDisplay();
+    setHTML("btCAGR",fmtPctCol(cagr));
+    setHTML("btDD",fmtPctCol(dd));
+    setText("btTrades",rets.length + "/" + sigs.length);
+    setText("btWinRate",(100*winRate).toFixed(1)+"%");
+    setHTML("btAvgWinLoss",fmtPct(avgWin)+" / "+fmtPct(avgLoss));
+    setText("btPF",pf.toFixed(2));
+    setText("btSharpe",sharpe.toFixed(2));
 
     // equity chart in %
     eqChart.setRelative(true);
@@ -1453,13 +1579,13 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       updateEquityHudRight();
 
       // Update equity chart title - always show instrument name only
-      const title = $("#equityHudTitle");
+      const title = byId("equityHudTitle");
       const instrumentName = STATE.name || (SELECTED && SELECTED.name) || "—";
 
-      if (instrumentName && instrumentName !== "—") {
+      if (title && instrumentName && instrumentName !== "—") {
         title.textContent = instrumentName;
         title.style.display = "block";
-      } else {
+      } else if(title){
         title.style.display = "none";
       }
     };
@@ -1470,7 +1596,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     eqChart.onhover=(evt)=>{
       const {i, dot} = evt || {};
 
-      const hud=$("#equityHud"), tip=$("#tip");
+      const hud=byId("equityHud"), tip=byId("tip"), canvas=byId("equityChart");
+      if(!hud || !tip || !canvas){ return; }
 
       // Show HUD if we have a valid index
       if(i !== null && eq[i]){
@@ -1506,7 +1633,6 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
           // For equity chart only: disable default CSS translate so we control exact position
           tip.style.transform = "none";
           // Position tooltip relative to the equity chart canvas, close to the dot
-          const canvas = $("#equityChart");
           const rect = canvas.getBoundingClientRect();
           tip.style.left = (rect.left + dot.px - 300) + "px"; // ~24px to the left of dot
           tip.style.top  = (rect.top + dot.py - 50) + "px";   // ~8px above
@@ -1535,7 +1661,6 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
           // For equity chart only: disable default CSS translate so we control exact position
           tip.style.transform = "none";
           // Position tooltip relative to the equity chart canvas, close to cursor
-          const canvas = $("#equityChart");
           const rect = canvas.getBoundingClientRect();
           tip.style.left = (rect.left + eqChart.pointer.x - 400) + "px"; // ~20px to the left of cursor
           tip.style.top  = (rect.top + eqChart.pointer.y - 8) + "px";   // ~8px above
@@ -1565,18 +1690,57 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       updateVisibleRangeKPIs();
     });
   }
-  $("#instrFile").addEventListener("change",()=>{ const f=$("#instrFile").files&&$("#instrFile").files[0]; if(!f){ return; } loadInstrumentsFile(f); });
-  $("#search").addEventListener("input",()=>{ renderSearch($("#searchResults"), filterInstruments($("#search").value), (o)=>{ SELECTED=o; STATE.name=o.name; showSelected("sel",o); $("#searchResults").innerHTML=""; }); });
-  $("#indexSearch").addEventListener("input",()=>{ renderSearch($("#indexResults"), filterInstruments($("#indexSearch").value), (o)=>{ INDEX_SELECTED=o; showSelected("index",o); $("#indexResults").innerHTML=""; }); });
-  $("#clearSel").addEventListener("click",()=>{ SELECTED=null; showSelected("sel",null); STATE.rows=[]; STATE.originalRows=[]; scheduleRecompute(); });
-  $("#clearIndexSel").addEventListener("click",()=>{ INDEX_SELECTED=null; showSelected("index",null); STATE.indexRows=[]; STATE.originalIndexRows=[]; STATE.indexDateToIdx=new Map(); scheduleRecompute(); });
+  on("instrFile","change",evt=>{
+    const input = evt.currentTarget;
+    const file = input && input.files && input.files[0];
+    if(!file) return;
+    loadInstrumentsFile(file);
+  });
 
-  $("#fetchBtn").addEventListener("click", async()=>{
+  const searchResultsEl = byId("searchResults");
+  on("search","input",evt=>{
+    if(!searchResultsEl) return;
+    const query = evt?.target?.value || "";
+    renderSearch(searchResultsEl, filterInstruments(query), o=>{
+      SELECTED=o; STATE.name=o.name; showSelected("sel",o);
+      searchResultsEl.innerHTML="";
+    });
+  });
+
+  const indexResultsEl = byId("indexResults");
+  on("indexSearch","input",evt=>{
+    if(!indexResultsEl) return;
+    const query = evt?.target?.value || "";
+    renderSearch(indexResultsEl, filterInstruments(query), o=>{
+      INDEX_SELECTED=o; showSelected("index",o);
+      indexResultsEl.innerHTML="";
+    });
+  });
+
+  on("clearSel","click",()=>{
+    SELECTED=null;
+    showSelected("sel",null);
+    STATE.rows=[];
+    STATE.originalRows=[];
+    scheduleRecompute();
+  });
+
+  on("clearIndexSel","click",()=>{
+    INDEX_SELECTED=null;
+    showSelected("index",null);
+    STATE.indexRows=[];
+    STATE.originalIndexRows=[];
+    STATE.indexDateToIdx=new Map();
+    scheduleRecompute();
+  });
+
+  on("fetchBtn","click", async evt=>{
+    const btn = evt?.currentTarget;
     try{
       if(!SELECTED) return alert("Pick an instrument.");
-      const key=$("#apiKey").value.trim(); if(!key) return alert("Enter API key.");
-      const from=$("#fromDate").value || "2024-01-01";
-      $("#fetchBtn").disabled=true; $("#fetchBtn").textContent="Fetching…";
+      const key=readValue("apiKey").trim(); if(!key) return alert("Enter API key.");
+      const from=readValue("fromDate") || "2024-01-01";
+      if(btn){ btn.disabled=true; btn.textContent="Fetching…"; }
       STATE.rows = await fetchPrices(SELECTED.insId, from, key);
       STATE.indexRows = INDEX_SELECTED ? await fetchPrices(INDEX_SELECTED.insId, from, key) : [];
       STATE.originalRows = [...STATE.rows]; // Store backup of original data
@@ -1587,22 +1751,32 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       // Ensure KPIs are computed on initial load without waiting for mouse events
       updateVisibleRangeKPIs();
     }catch(err){ console.error(err); alert("Fetch failed: "+err.message); }
-    finally{ $("#fetchBtn").disabled=false; $("#fetchBtn").textContent="Fetch prices"; }
+    finally{ if(btn){ btn.disabled=false; btn.textContent="Fetch prices"; } }
   });
 
   const ids=["relativeToIndex","window","dipPct","delay","horizon","highestSince","requireDip","onlyBreakout","shiftExit","cliffOn","cliffDays","cliffPct","volumeThreshold","smaPeriod","aboveSMA","belowSMA","autoY","smaCrossOn","smaCrossEnterPct","smaCrossExitPct","momentumExit","momDropPct","momLookback","momMaxExtend","sequentialTrades"];
   ids.forEach(id=>{
-    const el=$("#"+id);
-    el.addEventListener(el.type==="checkbox"?"change":"input",()=>{
+    const el=byId(id);
+    if(!el) return;
+    const ev = el.type==="checkbox"?"change":"input";
+    el.addEventListener(ev,()=>{
       if(id==="autoY"){ chart.setAutoY(el.checked); }
       scheduleRecompute();
     });
   });
   // Also update visible-range KPIs when sequential toggle changes (without full recompute)
-  $("#sequentialTrades").addEventListener("change",()=>{ updateVisibleRangeKPIs(); });
-  $("#lockY").addEventListener("click",()=>{ chart.lockYToCurrent(); $("#autoY").checked=false; });
-  $("#resetY").addEventListener("click",()=>{ chart.resetY(); $("#autoY").checked=true; });
-  $("#resetZoom").addEventListener("click",()=>{
+  on("sequentialTrades","change",()=>{ updateVisibleRangeKPIs(); });
+  on("lockY","click",()=>{
+    chart.lockYToCurrent();
+    const autoY=byId("autoY");
+    if(autoY) autoY.checked=false;
+  });
+  on("resetY","click",()=>{
+    chart.resetY();
+    const autoY=byId("autoY");
+    if(autoY) autoY.checked=true;
+  });
+  on("resetZoom","click",()=>{
     // If data has been filtered by "Run" button, restore original data
     if (STATE.originalRows.length > STATE.rows.length) {
       STATE.rows = [...STATE.originalRows];
@@ -1611,10 +1785,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       scheduleRecompute();
     } else {
       chart.resetZoom();
-      $("#autoY").checked=true;
+      const autoY=byId("autoY");
+      if(autoY) autoY.checked=true;
     }
   });
-  $("#runBtn").addEventListener("click",()=>{
+  on("runBtn","click",()=>{
     // Filter to [first,last] visible dates, aligning index by date (not by slice)
     const [visibleStart, visibleEnd] = chart.visibleRange();
     const n = STATE.rows.length;
@@ -1635,7 +1810,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   });
 
   // Export equity CSV with summary row
-  $("#exportEquity").addEventListener("click",()=>{
+  on("exportEquity","click",()=>{
     if(!STATE.equity || !STATE.equity.length){ alert("No equity to export."); return; }
     // Build CSV lines from existing equity
     const lines = ["date,equity"];
@@ -1643,7 +1818,6 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     // Compute summary metrics using current visible window
     const m = computeVisibleRangeMetrics();
     if(m){
-      const fmtOr = v => v==null?"—":(100*v).toFixed(3)+"%"; // keep raw percent numeric formatting in CSV
       lines.push("");
       lines.push("Summary");
       lines.push("visible_start_date,visible_end_date,invested_days_visible,return_per_day_invested,range_return_visible,return_per_day_visible");
@@ -1658,11 +1832,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   /* ===== .env Auto-Loading ===== */
   async function checkAndLoadEnvFile(){
-    const envStatus = $("#envStatus");
+    const envStatus = byId("envStatus");
 
     // Check if we're running from file:// protocol
     if (window.location.protocol === 'file:') {
-      envStatus.textContent = 'File mode: .env loading disabled (use web server for auto-loading)';
+      if(envStatus) envStatus.textContent = 'File mode: .env loading disabled (use web server for auto-loading)';
       console.log('Running in file:// mode - .env auto-loading disabled');
       return;
     }
@@ -1673,7 +1847,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       if (!response.ok) {
         // .env file doesn't exist or can't be accessed
         console.log('.env file not found or not accessible');
-        envStatus.textContent = '.env file not found (this is normal)';
+        if(envStatus) envStatus.textContent = '.env file not found (this is normal)';
         return;
       }
 
@@ -1684,7 +1858,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
       // Auto-populate API key if found
       if (envVars.API_KEY) {
-        $("#apiKey").value = envVars.API_KEY;
+        const apiEl = byId("apiKey");
+        if(apiEl) apiEl.value = envVars.API_KEY;
         statusMsg += ' • API key set';
         console.log('API key auto-loaded from .env file');
       }
@@ -1697,27 +1872,27 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
             const instrContent = await instrResponse.text();
             const json = JSON.parse(instrContent);
             INSTRUMENTS = mapInstruments(autoDetect(json));
-            $("#instrStatus").textContent = "Auto-loaded " + INSTRUMENTS.length + " instruments from " + envVars.INSTRUMENT_FILE;
+            setText("instrStatus", "Auto-loaded " + INSTRUMENTS.length + " instruments from " + envVars.INSTRUMENT_FILE);
             statusMsg += ' • instruments loaded';
             console.log('Instruments auto-loaded from .env specified file:', envVars.INSTRUMENT_FILE);
           } else {
-            $("#instrStatus").textContent = "Failed to load instrument file from .env: " + envVars.INSTRUMENT_FILE;
+            setText("instrStatus", "Failed to load instrument file from .env: " + envVars.INSTRUMENT_FILE);
             statusMsg += ' • instrument file failed';
             console.error('Failed to load instrument file specified in .env:', envVars.INSTRUMENT_FILE);
           }
         } catch (error) {
-          $("#instrStatus").textContent = "Error parsing instrument file from .env: " + error.message;
+          setText("instrStatus", "Error parsing instrument file from .env: " + error.message);
           statusMsg += ' • instrument parse error';
           console.error('Error loading instrument file from .env:', error);
         }
       }
 
-      envStatus.textContent = statusMsg;
+      if(envStatus) envStatus.textContent = statusMsg;
 
     } catch (error) {
       // .env file not found or other error - this is expected in most cases
       console.log('.env file check failed (this is normal):', error.message);
-      envStatus.textContent = '.env check failed (browser security)';
+      if(envStatus) envStatus.textContent = '.env check failed (browser security)';
     }
   }
 
