@@ -36,6 +36,11 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .list{max-height:160px;overflow:auto;border:1px dashed var(--grid);border-radius:8px}
 .list .item{padding:6px 8px;cursor:pointer;border-bottom:1px dashed #1f2a3a}
 .list .item:hover{background:#0e141d}
+/* csv list selected + spinner */
+.list .item.selected{background:#0e141d;position:relative}
+.list .item.selected::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right}
 th:first-child,td:first-child{text-align:left}
@@ -93,12 +98,32 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
     </details><details class="card" open="">
       <summary><span class="chev"></span> Instruments search</summary>
       <div class="body">
-        <input id="search" type="text" placeholder="Search name / ticker…">
+        <div class="row">
+          <input id="search" type="text" placeholder="Search name / ticker…">
+          <input id="stocksCsvFile" type="file" accept="text/csv,.csv" style="display:none">
+          <button id="loadStocksCsv" class="ghost">Load Stocks CSV</button>
+          <button id="csvShow" class="ghost" style="display:none">Show list</button>
+        </div>
         <div id="searchResults" class="list" style="margin-top:6px"></div>
         <div class="grid3" style="margin-top:8px">
           <div id="selName" class="pill">AstraZeneca</div>
           <div id="selTicker" class="pill">AZN</div>
           <div id="selInsId" class="pill">18</div>
+        </div>
+
+        <div id="csvListPanel" class="card" style="margin-top:10px; display:none">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <div style="display:flex;gap:8px;align-items:center">
+              <strong>CSV Watchlist</strong>
+              <span id="csvSortLabel" class="muted" style="cursor:pointer" title="Sort: CSV → A–Z → Z–A">Sort: CSV</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <a id="csvClear" class="muted" style="cursor:pointer">Clear list</a>
+              <button id="csvHide" class="ghost">Hide list</button>
+              <button id="csvClose" class="ghost" title="Close">×</button>
+            </div>
+          </div>
+          <div id="csvList" class="list" role="listbox" tabindex="0" aria-label="CSV Watchlist" style="max-height:320px"></div>
         </div>
 
         <div class="row" style="margin-top:10px"><strong>Benchmark (index) search</strong></div>
@@ -357,6 +382,250 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
   const fmt = n => n==null ? "—" : Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
   const fmtPct = (x,dec=2) => (x>=0?"+":"") + (100*x).toFixed(dec) + "%";
   const fmtPctCol = x => '<span style="color:'+(x>=0?COL.green:COL.red)+'">'+fmtPct(x)+'</span>';
+
+  /* ===== CSV Import Utils (Stocks) ===== */
+  function parseCsv(text){
+    const rows=[]; let row=[]; let val=""; let inQuotes=false; let i=0;
+    while(i<text.length){
+      const ch = text[i];
+      if(ch==='"'){
+        if(inQuotes){
+          const next = text[i+1];
+          if(next==='"'){ val+='"'; i+=2; continue; }
+          inQuotes=false; i++; continue;
+        } else { inQuotes=true; i++; continue; }
+      }
+      if(ch===',' && !inQuotes){ row.push(val); val=""; i++; continue; }
+      if((ch==='\n' || ch==='\r') && !inQuotes){
+        // finish cell
+        row.push(val); val="";
+        // handle CRLF or LF
+        if(ch==='\r' && text[i+1]==='\n') i++;
+        rows.push(row); row=[]; i++; continue;
+      }
+      val += ch; i++;
+    }
+    // last cell/row
+    row.push(val);
+    // avoid trailing empty last row if file ended with newline
+    if(!(row.length===1 && row[0]==="" && rows.length>0)) rows.push(row);
+    // trim cells
+    for(let r=0;r<rows.length;r++){
+      for(let c=0;c<rows[r].length;c++){
+        const cell = rows[r][c];
+        rows[r][c] = typeof cell === 'string' ? cell.trim() : cell;
+      }
+    }
+    return rows;
+  }
+
+  function normalizeHeader(h){
+    return String(h||"").trim().toLowerCase().replace(/\s+/g,'_');
+  }
+
+  function parseStocksCsv(csvText){
+    const table = parseCsv(csvText||"");
+    if(!table || table.length===0) return { ok:false, error:"Empty CSV" };
+    const headerRaw = table[0];
+    const header = headerRaw.map(normalizeHeader);
+    const required = ["source","watchlist","stock_name","insid"];
+    const idx = {};
+    for(const key of required){
+      const at = header.indexOf(key);
+      if(at===-1){
+        const missing = required.filter(k=>header.indexOf(k)===-1).join(", ");
+        return { ok:false, error:"Invalid header. Missing: "+missing };
+      }
+      idx[key]=at;
+    }
+    const data = [];
+    for(let r=1;r<table.length;r++){
+      const row = table[r]; if(!row || row.length===0) continue;
+      const rec = {
+        source: row[idx.source] ?? "",
+        watchlist: row[idx.watchlist] ?? "",
+        stock_name: row[idx.stock_name] ?? "",
+        insIdRaw: row[idx.insid] ?? ""
+      };
+      data.push(rec);
+    }
+    return { ok:true, header:headerRaw, headerNorm:header, indices:idx, rows:data };
+  }
+
+  function processStocksCsv(csvText){
+    const base = parseStocksCsv(csvText);
+    if(!base.ok) return base;
+    let invalid=0, duplicates=0;
+    const seen = new Set();
+    const items = [];
+    for(const rec of base.rows){
+      const insIdStr = String(rec.insIdRaw==null?"":rec.insIdRaw).trim();
+      const insId = Number(insIdStr);
+      const stockName = String(rec.stock_name||"").trim();
+      if(!Number.isFinite(insId) || insId<=0){ invalid++; continue; }
+      if(!stockName){ invalid++; continue; }
+      if(seen.has(insId)){ duplicates++; continue; }
+      seen.add(insId);
+      items.push({ insId, stock_name: stockName, source: rec.source||"", watchlist: rec.watchlist||"" });
+    }
+    if(items.length>2000){
+      return { ok:false, error:`Too many rows (${items.length}). Max 2000.`, counts:{ imported:0, duplicates, invalid } };
+    }
+    return { ok:true, items, counts:{ imported: items.length, duplicates, invalid } };
+  }
+
+  /* ===== CSV Watchlist State/Render ===== */
+  const CSV_SORT = { CSV:0, AZ:1, ZA:2 };
+  let csvSortMode = CSV_SORT.CSV;
+  let csvSelectedInsId = null; // selected item identity
+  let csvLoadingInsId = null;  // row showing spinner
+  function csvSortNext(){ csvSortMode = (csvSortMode+1)%3; updateCsvSortLabel(); renderCsvList(); }
+  function updateCsvSortLabel(){ const el=byId("csvSortLabel"); if(!el) return; el.textContent = "Sort: " + (csvSortMode===0?"CSV":csvSortMode===1?"A–Z":"Z–A"); }
+  function getCsvItemsInOrder(){
+    const items = (STATE.csvStocks||[]).slice();
+    if(csvSortMode===CSV_SORT.AZ){ items.sort((a,b)=>String(a.stock_name).localeCompare(String(b.stock_name))); }
+    else if(csvSortMode===CSV_SORT.ZA){ items.sort((a,b)=>String(b.stock_name).localeCompare(String(a.stock_name))); }
+    return items;
+  }
+  function lookupTicker(insId){
+    // INSTRUMENTS is populated elsewhere; attempt to find ticker by insId
+    try{
+      const id=Number(insId);
+      const found = Array.isArray(INSTRUMENTS)?INSTRUMENTS.find(o=>Number(o.insId)===id):null;
+      return found && found.ticker ? String(found.ticker) : "";
+    }catch(_){ return ""; }
+  }
+  function getSelectedIndex(items){
+    if(!Array.isArray(items) || items.length===0) return -1;
+    const id = csvSelectedInsId;
+    return id==null ? -1 : items.findIndex(o=>Number(o.insId)===Number(id));
+  }
+  function renderCsvList(){
+    const panel=byId("csvListPanel"); const list=byId("csvList");
+    const has = Array.isArray(STATE.csvStocks) && STATE.csvStocks.length>0;
+    if(panel) panel.style.display = has?"block":"none";
+    if(!list){ return; }
+    if(!has){ list.innerHTML=""; return; }
+    const items = getCsvItemsInOrder();
+    const selIx = getSelectedIndex(items);
+    const html = items.map((o,ix)=>{
+      const isSel = ix===selIx;
+      const selected = isSel ? " selected" : "";
+      const ticker = lookupTicker(o.insId);
+      return '<div class="item'+selected+'" role="option" aria-selected="'+isSel+'" data-ix="'+ix+'">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<div>' + escapeHtml(o.stock_name) + (ticker? ' <span class="muted">('+escapeHtml(ticker)+')</span>':'' ) + '</div>'
+        + (Number(o.insId)===Number(csvLoadingInsId)?'<div class="spinner" aria-hidden="true"></div>':'')
+        + '</div>'
+        + '</div>';
+    }).join("");
+    list.innerHTML = html;
+    list.querySelectorAll('.item').forEach(el=>{
+      el.addEventListener('click',()=>{
+        const ix = Number(el.getAttribute('data-ix'));
+        csvSelectIndex(ix, true);
+        list.focus();
+      });
+    });
+  }
+  function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+  function csvEnsureVisible(ix){
+    const list=byId("csvList"); if(!list) return;
+    const el=list.querySelector('.item[data-ix="'+ix+'"]'); if(!el) return;
+    el.scrollIntoView({block:'nearest'});
+  }
+  function csvSelectIndex(ix, load){
+    const items = getCsvItemsInOrder();
+    if(items.length===0) return;
+    if(ix<0) ix = items.length-1; if(ix>=items.length) ix=0;
+    const item = items[ix];
+    csvSelectedInsId = item.insId;
+    if(load){ csvLoadingInsId = item.insId; }
+    renderCsvList();
+    csvEnsureVisible(ix);
+    if(load){ csvLoadSelected(item); }
+  }
+  async function csvLoadSelected(item){
+    try{
+      // immediate load: reuse fetch logic
+      SELECTED = { name:item.stock_name, ticker:"", insId:item.insId };
+      STATE.name = item.stock_name;
+      showSelected("sel", SELECTED);
+      const key=readValue("apiKey").trim(); if(!key){ showToast("Enter API key.", 'error'); return; }
+      const from=readValue("fromDate") || "2024-01-01";
+      // show spinner already rendered on selected row
+      STATE.rows = await fetchPrices(item.insId, from, key);
+      STATE.indexRows = INDEX_SELECTED ? await fetchPrices(INDEX_SELECTED.insId, from, key) : [];
+      STATE.originalRows = [...STATE.rows];
+      STATE.originalIndexRows = [...STATE.indexRows];
+      STATE.indexDateToIdx = new Map(STATE.indexRows.map((r,ix)=>[toISO(r.date), ix]));
+      updateMetricLabels(); updateSignalsAndMetrics(); renderMainChart(); updateBacktest();
+      updateVisibleRangeKPIs();
+    }catch(err){ console.error(err); showToast("Load failed: "+err.message, 'error'); }
+    finally{
+      // re-render to remove spinner state
+      csvLoadingInsId = null;
+      renderCsvList();
+    }
+  }
+
+  // keyboard navigation for listbox
+  on("csvList","keydown",(evt)=>{
+    const items = getCsvItemsInOrder(); if(items.length===0) return;
+    const key = evt.key;
+    const page = 10;
+    if(["ArrowUp","ArrowDown","Home","End","PageUp","PageDown"].includes(key)) evt.preventDefault();
+    const curIx = getSelectedIndex(items);
+    if(key==="ArrowUp") csvSelectIndex((curIx<0?0:curIx)-1, true);
+    else if(key==="ArrowDown") csvSelectIndex((curIx<0?-1:curIx)+1, true);
+    else if(key==="Home") csvSelectIndex(0, true);
+    else if(key==="End") csvSelectIndex(items.length-1, true);
+    else if(key==="PageUp") csvSelectIndex((curIx<0?0:curIx)-page, true);
+    else if(key==="PageDown") csvSelectIndex((curIx<0?-page:curIx)+page, true);
+  });
+
+  // controls
+  on("csvSortLabel","click",()=>{ csvSortNext(); });
+  on("csvHide","click",()=>{ const p=byId("csvListPanel"); if(p) p.style.display="none"; const s=byId("csvShow"); if(s) s.style.display="inline-block"; });
+  on("csvShow","click",()=>{ const p=byId("csvListPanel"); if(p) p.style.display="block"; const s=byId("csvShow"); if(s) s.style.display="none"; });
+  on("csvClose","click",()=>{ STATE.csvStocks=[]; csvSelectedInsId=null; csvLoadingInsId=null; renderCsvList(); });
+  on("csvClear","click",()=>{ STATE.csvStocks=[]; csvSelectedInsId=null; csvLoadingInsId=null; renderCsvList(); showToast("Cleared CSV list", 'info'); });
+  /* ===== Minimal Toast/Banner ===== */
+  let TOAST_HOST=null;
+  function ensureToastHost(){
+    if(TOAST_HOST) return TOAST_HOST;
+    TOAST_HOST = document.createElement('div');
+    TOAST_HOST.id = 'toastHost';
+    const st = TOAST_HOST.style;
+    st.position='fixed'; st.top='12px'; st.right='12px'; st.zIndex='5000';
+    st.display='grid'; st.gap='8px';
+    document.addEventListener('DOMContentLoaded',()=>{ document.body.appendChild(TOAST_HOST); });
+    // If DOMContentLoaded already fired
+    if(document.readyState==='interactive' || document.readyState==='complete'){
+      try{ document.body.appendChild(TOAST_HOST); }catch(_){ /* ignore until ready */ }
+    }
+    return TOAST_HOST;
+  }
+  function showToast(message, type='info', timeout=3200){
+    const host = ensureToastHost();
+    const el = document.createElement('div');
+    const bg = type==='error' ? 'rgba(180,40,40,.9)' : type==='success' ? 'rgba(40,140,80,.9)' : 'rgba(30,40,55,.95)';
+    Object.assign(el.style, {
+      background:bg, color:'#fff', padding:'10px 12px', borderRadius:'10px',
+      border:'1px solid rgba(255,255,255,.12)', minWidth:'220px', maxWidth:'420px',
+      boxShadow:'0 6px 20px rgba(0,0,0,.35)', fontSize:'12px'
+    });
+    el.textContent = String(message||'');
+    host.appendChild(el);
+    if(timeout>0){ setTimeout(()=>{ try{ host.removeChild(el); }catch(_){ /* ignore */ } }, timeout); }
+    return el;
+  }
+  function showImportSummary(counts){
+    if(!counts) return;
+    const { imported=0, duplicates=0, invalid=0 } = counts;
+    const msg = `Imported ${imported}, removed ${duplicates} duplicates, ${invalid} invalid`;
+    showToast(msg, 'success');
+  }
 
   function rollingAvg(arr, n){
     const out = new Array(arr.length).fill(null);
@@ -1882,6 +2151,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     renderSearch(searchResultsEl, filterInstruments(query), o=>{
       SELECTED=o; STATE.name=o.name; showSelected("sel",o);
       searchResultsEl.innerHTML="";
+      // If selected instrument is not part of CSV list, clear CSV selection highlight
+      const items = Array.isArray(STATE.csvStocks)?STATE.csvStocks:[];
+      if(!items.some(it=>Number(it.insId)===Number(o.insId))){ csvSelectedInsId = null; renderCsvList(); }
     });
   });
 
@@ -1910,6 +2182,34 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     STATE.originalIndexRows=[];
     STATE.indexDateToIdx=new Map();
     scheduleRecompute();
+  });
+
+  // Load Stocks CSV wiring
+  on("loadStocksCsv","click",()=>{
+    const f = byId("stocksCsvFile");
+    if(f) f.click();
+  });
+  on("stocksCsvFile","change", async ()=>{
+    const input = byId("stocksCsvFile");
+    const file = input && input.files && input.files[0];
+    if(!file){ return; }
+    try{
+      const text = await file.text();
+      const res = processStocksCsv(text);
+      if(!res.ok){ showToast(res.error||"Failed to import CSV", 'error'); return; }
+      // Store imported list in memory for later UI (list panel)
+      STATE.csvStocks = res.items;
+      showImportSummary(res.counts);
+      // show list and select first item but don't auto-load yet
+      const list=byId("csvList"); const panel=byId("csvListPanel");
+      if(panel) panel.style.display="block";
+      csvSelectedIndex = 0;
+      renderCsvList();
+    }catch(err){ console.error(err); showToast("CSV read/parse failed: "+err.message, 'error'); }
+    finally{
+      // reset value to allow re-uploading the same file
+      try{ byId("stocksCsvFile").value = ""; }catch(_){ /* ignore */ }
+    }
   });
 
   on("fetchBtn","click", async evt=>{
