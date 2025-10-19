@@ -19,6 +19,7 @@ main.right{display:grid;grid-template-rows:auto auto 1fr;gap:8px}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:12px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .bt-total-badge{font-size:11px;color:var(--green);margin-left:6px;white-space:nowrap}
+.bt-total-effective{font-size:11px;color:var(--green);margin-left:4px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -191,6 +192,18 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
           <label><input id="aboveSMA" type="checkbox"> Only trigger if above SMA</label>
           <label><input id="belowSMA" type="checkbox"> Only trigger if below SMA</label>
         </div>
+
+        <div class="card" style="margin-top:8px">
+          <div class="row">
+            <label><input id="rsiOn" type="checkbox"> Trigger on RSI</label>
+            <span class="help" data-tip="Generate entries when RSI is below Buy threshold and exits when RSI rises above Sell threshold. Wilder (14) by default.">?</span>
+          </div>
+          <div class="grid3" style="margin-top:8px">
+            <div><label>RSI Period</label><input id="rsiPeriod" type="number" min="2" max="200" value="14"></div>
+            <div><label>Buy when RSI below</label><input id="rsiBuyBelow" type="number" min="0" max="100" step="1" value="30"></div>
+            <div><label>Sell when RSI above</label><input id="rsiSellAbove" type="number" min="0" max="100" step="1" value="80"></div>
+          </div>
+        </div>
       </div>
     </details>
 
@@ -261,7 +274,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         </div>
       </div>
       <div class="grid4" style="margin-top:8px">
-        <div><div class="muted">Total return</div><div id="btTotal" style="font-weight:700"><span style="color:#39e29d">+14.30%</span></div></div>
+        <div><div class="muted" id="btTotalLabel">Total return</div><div id="btTotal" style="font-weight:700"><span style="color:#39e29d">+14.30%</span></div></div>
         <div><div class="muted">CAGR</div><div id="btCAGR" style="font-weight:700"><span style="color:#39e29d">+5.66%</span></div></div>
         <div><div class="muted">Max DD</div><div id="btDD" style="font-weight:700"><span style="color:#ff4d4d">-6.29%</span></div></div>
         <div><div class="muted">Trades/Signals</div><div id="btTrades" style="font-weight:700">8/18</div></div>
@@ -276,7 +289,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
           <div id="btInvReturnPerDay" style="font-weight:700"><span style="color:#39e29d">+0.076%</span> <span class="kpi-subnote muted">over 176 days</span></div>
         </div>
         <div>
-          <div class="muted">Stock performance (<span id="btVisibleDates">24-01-02 - 25-09-05</span>) <span class="help" data-tip="P[Ve]/P[Vs]-1. If Relative to index is ON: (1+stock)/(1+bench)-1.">?</span></div>
+          <div class="muted">Stock perf. (<span id="btVisibleDates">24-01-02 - 25-09-05</span>) <span class="help" data-tip="P[Ve]/P[Vs]-1. If Relative to index is ON: (1+stock)/(1+bench)-1.">?</span></div>
           <div id="btRangeReturn" style="font-weight:700"><span style="color:#39e29d">+10.29%</span></div>
         </div>
         <div>
@@ -293,6 +306,9 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
         <div id="equityHud" class="hud" style="display: none;">2024-02-16 • -1.58%</div>
         <div id="equityHudRight" class="hud-right" style="display: block;">+14.30%</div>
         <div id="equityHudTitle" class="hud-title" style="display: block;">AstraZeneca</div>
+      </div>
+      <div id="rsiBox" class="card" style="height:160px; margin-top:10px">
+        <canvas id="rsiChart"></canvas>
       </div>
     </div>
   </main>
@@ -378,6 +394,63 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
     m.set(key, arr);
     return arr;
   }
+  // ===== RSI (Wilder) =====
+  const RSI_ARRAY_CACHE = new WeakMap();
+  function computeRSIArray(vals, period){
+    const n = vals.length|0;
+    if(!period || period<=1) return new Array(n).fill(null);
+    let m = RSI_ARRAY_CACHE.get(vals);
+    if(!m){ m=new Map(); RSI_ARRAY_CACHE.set(vals,m); }
+    const key = period|0;
+    if(m.has(key)) return m.get(key);
+    const out = new Array(n).fill(null);
+    if(n < period+1){ m.set(key, out); return out; }
+
+    let gainSum = 0, lossSum = 0;
+    for(let i=1;i<=period;i++){
+      const a = vals[i-1], b = vals[i];
+      if(!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      const d = b - a;
+      if(d>0) gainSum += d; else lossSum += -d;
+    }
+    let avgGain = gainSum / period;
+    let avgLoss = lossSum / period;
+    function rsiFrom(ag, al){
+      if(ag===0 && al===0) return 50;
+      if(al===0) return 100;
+      if(ag===0) return 0;
+      const rs = ag / al;
+      return 100 - 100/(1+rs);
+    }
+    out[period] = rsiFrom(avgGain, avgLoss);
+    for(let i=period+1;i<n;i++){
+      const a = vals[i-1], b = vals[i];
+      if(Number.isFinite(a) && Number.isFinite(b)){
+        const d = b - a;
+        const gain = d>0 ? d : 0;
+        const loss = d<0 ? -d : 0;
+        avgGain = ((avgGain * (period - 1)) + gain) / period;
+        avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+        out[i] = rsiFrom(avgGain, avgLoss);
+      } else {
+        out[i] = out[i-1];
+      }
+    }
+    m.set(key, out);
+    return out;
+  }
+  const RSI_ROWS_CACHE = new WeakMap();
+  function computeRSI(rows, period){
+    if(!period || period<=1) return new Array(rows.length).fill(null);
+    let m = RSI_ROWS_CACHE.get(rows);
+    if(!m){ m=new Map(); RSI_ROWS_CACHE.set(rows,m); }
+    const key = period|0;
+    if(m.has(key)) return m.get(key);
+    const closes = rows.map(r=>r.close);
+    const arr = computeRSIArray(closes, period);
+    m.set(key, arr);
+    return arr;
+  }
   function maxDrawdown(vals){
     if(!vals.length) return 0;
     let peak = Number.isFinite(vals[0]) && vals[0] > 0 ? vals[0] : 0.0001;
@@ -395,7 +468,7 @@ canvas{width:100%;height:100%;display:block;background:var(--bg);border-radius:1
 
   /* ===== State ===== */
   let INSTRUMENTS=[], SELECTED=null, INDEX_SELECTED=null;
-  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map(), version:0, backtestTotalReturn:null, visibleRangeMetrics:null };
+  const STATE={ rows:[], indexRows:[], signals:[], equity:[], name:"—", originalRows:[], originalIndexRows:[], indexDateToIdx:new Map(), version:0, backtestTotalReturn:null, visibleRangeMetrics:null, totalReturnEffective:false, totalReturnEffectiveFactor:null };
 
   /* ===== Instruments ===== */
   function mapInstruments(arr){
@@ -571,6 +644,53 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   }
 
   const signals = [];
+  // ===== RSI buy-below / sell-above strategy =====
+  if (opts.rsiOn && opts.rsi && opts.rsi.some(x=>Number.isFinite(x))){
+    let inPos = false; let entryIdx = -1;
+    for(let i=1;i<N;i++){
+      const prev = opts.rsi[i-1], now = opts.rsi[i];
+      if(!Number.isFinite(prev) || !Number.isFinite(now)) continue;
+      // Entry when crossing down through buy threshold (yesterday > thr, today <= thr)
+      if(!inPos){
+        const crossDown = (prev > opts.rsiBuyBelow) && (now <= opts.rsiBuyBelow);
+        if(crossDown && passVolume(i) && passSMAFilter(i)){
+          entryIdx = i + (opts.delayDays||0);
+          if(entryIdx >= N) break;
+          inPos = true;
+        }
+      } else {
+        // Exit when crossing up through sell threshold (yesterday < thr, today >= thr)
+        const crossUp = (prev < opts.rsiSellAbove) && (now >= opts.rsiSellAbove);
+        if(crossUp){
+          const baseStart  = (opts.shiftExit ? entryIdx : i);
+          const horizonIdx = Math.min(baseStart + horizon, N - 1);
+          const cliffIdxRaw = opts.cliffOn ? cliffExitIndex(closes, lows, entryIdx, horizonIdx, opts.cliffDays, opts.cliffPct) : null;
+          const cliffIdx = (cliffIdxRaw == null) ? Infinity : cliffIdxRaw;
+          let momIdx = null, holdIdx = horizonIdx;
+          if (opts.momentumExit){
+            const horizonForMom = Math.max(0, horizon - (opts.shiftExit ? 0 : (opts.delayDays || 0)));
+            momIdx  = momentumExit(closes, entryIdx, horizonForMom, opts.momLookback, opts.momDropPct, opts.momMaxExtend, false);
+            holdIdx = Math.max(horizonIdx, momIdx);
+          }
+          const earlyIdx = cliffIdx;
+          const end      = Math.min(earlyIdx, holdIdx);
+          let exitType = "horizon";
+          if (end === cliffIdx) exitType = "cliff";
+          else if (opts.momentumExit && momIdx != null && end === momIdx && momIdx > horizonIdx) exitType = "momentum";
+          const ret = closes[end]/closes[entryIdx] - 1;
+          signals.push({
+            kind: "rsi",
+            triggerIndex: entryIdx, triggerDate: rows[entryIdx].date, triggerClose: closes[entryIdx],
+            endIndex: end, endDate: rows[end].date, endClose: closes[end],
+            fwdRet: ret,
+            cliff: exitType === "cliff",
+            exitType
+          });
+          inPos = false; entryIdx = -1;
+        }
+      }
+    }
+  }
   // Track if we've already emitted at least one breakout signal. Used to allow the
   // very first breakout even when requireDip is enabled; subsequent breakout-only
   // signals will then require a recovery (dip) first.
@@ -987,6 +1107,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   const chart=new LineChart($("#chart"));
   const eqChart=new LineChart($("#equityChart"));
+  class FixedYChart extends LineChart{
+    constructor(canvas, ymin, ymax){ super(canvas); this.fixedY=[ymin,ymax]; this.autoY=false; this.padding={l:56,r:16,t:16,b:24}; }
+    computeYDomain(){ return this.fixedY; }
+  }
+  const rsiChart=new FixedYChart($("#rsiChart"), 0, 100);
 
   /* ===== Rendering & metrics ===== */
   function updateMetricLabels(){
@@ -1099,6 +1224,16 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
   }
 
   function updateTotalReturnDisplay(){
+    const labelEl = byId("btTotalLabel");
+    if(labelEl){
+      if(STATE.totalReturnEffective){
+        const factor = Number.isFinite(STATE.totalReturnEffectiveFactor) ? STATE.totalReturnEffectiveFactor.toFixed(2) + 'x' : '';
+        const suffix = factor ? `- effective ${factor}` : '- effective';
+        labelEl.innerHTML = `Total return <span class="bt-total-effective">${suffix}</span>`;
+      } else {
+        labelEl.textContent = 'Total return';
+      }
+    }
     const el = byId("btTotal");
     if(!el) return;
     const total = STATE.backtestTotalReturn;
@@ -1109,8 +1244,12 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     let html = fmtPctCol(total);
     const metrics = STATE.visibleRangeMetrics;
     const bench = metrics && typeof metrics.benchRangeReturn === "number" ? metrics.benchRangeReturn : null;
+    const stock = metrics && typeof metrics.rangeReturn === "number" ? metrics.rangeReturn : null;
     if(bench!=null && Number.isFinite(bench) && total > bench){
       html += ' <span class="bt-total-badge">☑ beat index</span>';
+    }
+    if(stock!=null && Number.isFinite(stock) && total > stock){
+      html += ' <span class="bt-total-badge">☑ beat stock</span>';
     }
     el.innerHTML = html;
   }
@@ -1129,6 +1268,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       if(elRatio) elRatio.textContent = "—";
       if(elDates) elDates.textContent = "";
       STATE.visibleRangeMetrics = null;
+      STATE.totalReturnEffective = false;
+      STATE.totalReturnEffectiveFactor = null;
       updateTotalReturnDisplay();
       return;
     }
@@ -1141,6 +1282,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       if(elRangePerDay) elRangePerDay.textContent = "—";
       if(elRatio) elRatio.textContent = "—";
       STATE.visibleRangeMetrics = null;
+      STATE.totalReturnEffective = false;
+      STATE.totalReturnEffectiveFactor = null;
       updateTotalReturnDisplay();
       return;
     }
@@ -1175,18 +1318,26 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       elRangePerDay.innerHTML = `<span style="color:${pctv}">${fmtPct3(m.perDayVisible)}</span> <span class="kpi-subnote muted">over ${m.visibleDays} days</span>`;
     }
     // Uplift vs B&H: (invPerDay - perDayVisible) / abs(perDayVisible)
-    if (elRatio) {
-      const den = m.perDayVisible;
-      if (m.invPerDay == null || den == null || den === 0) {
+    const den = m.perDayVisible;
+    let effectiveFlag = false;
+    if (m.invPerDay == null || den == null || den === 0) {
+      if (elRatio) {
         elRatio.textContent = "—";
-      } else {
-        const uplift = (m.invPerDay - den) / Math.abs(den); // e.g., +1.61 = +161% better/day
-        const factor = 1 + uplift;                          // express as "×"
-        const col = uplift >= 0 ? COL.green : COL.red;
+        elRatio.removeAttribute("title");
+      }
+      STATE.totalReturnEffectiveFactor = null;
+    } else {
+      const uplift = (m.invPerDay - den) / Math.abs(den); // e.g., +1.61 = +161% better/day
+      const factor = 1 + uplift;                          // express as "×"
+      effectiveFlag = Number.isFinite(factor) && factor > 1;
+      STATE.totalReturnEffectiveFactor = effectiveFlag ? factor : null;
+      const col = uplift >= 0 ? COL.green : COL.red;
+      if (elRatio) {
         elRatio.innerHTML = `<span style="color:${col}">${factor.toFixed(2)}x</span>`;
         elRatio.title = `Per-day uplift vs buy-and-hold; ${(uplift*100).toFixed(0)}% better/day.`;
       }
     }
+    STATE.totalReturnEffective = effectiveFlag;
     updateTotalReturnDisplay();
   }
 
@@ -1222,6 +1373,24 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       dots.push({idx:s.endIndex, role:"exit", pairIdx:s.triggerIndex});
     }
     chart.setDots(dots);
+
+    // RSI panel (always visible under equity)
+    const rsiPeriod = Math.max(2, readInt("rsiPeriod", 14));
+    const rsi = computeRSI(rows, rsiPeriod);
+    rsiChart.setRelative(false);
+    rsiChart.setData({
+      length: rows.length,
+      date: i => rows[i].date,
+      value: i => rsi ? rsi[i] : null,
+      aux: null
+    });
+    // dashed guides at 30/70
+    rsiChart.onrender = ()=>{
+      const ctx = rsiChart.ctx; const W=rsiChart.canvas.clientWidth; const {l,r}=rsiChart.padding;
+      ctx.save(); ctx.setLineDash([6,6]); ctx.strokeStyle="rgba(255,255,255,0.25)"; ctx.lineWidth=1;
+      [30,70].forEach(v=>{ const y=rsiChart.y2px(v); ctx.beginPath(); ctx.moveTo(l,y); ctx.lineTo(W-r,y); ctx.stroke(); });
+      ctx.restore();
+    };
 
     // Function to update right-edge HUD based on current visible window
     const updateRightEdgeHud = ()=>{
@@ -1392,6 +1561,11 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
 
   function buildSignalOptions(rows){
     const smaPeriod = readInt("smaPeriod", 0);
+    const rsiOn = readCheck("rsiOn");
+    const rsiPeriod = Math.max(2, readInt("rsiPeriod", 14));
+    const rsiBuyBelow = Math.max(0, Math.min(100, readInt("rsiBuyBelow", 30)));
+    const rsiSellAbove = Math.max(0, Math.min(100, readInt("rsiSellAbove", 80)));
+    const rsi = rsiOn ? computeRSI(rows, rsiPeriod) : null;
     return {
       delayDays:readInt("delay",0),
       highestSince:readInt("highestSince",0),
@@ -1411,7 +1585,9 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       momentumExit:readCheck("momentumExit"),
       momDropPct:readFloat("momDropPct",0),
       momLookback:readInt("momLookback",0),
-      momMaxExtend:readInt("momMaxExtend",0)
+      momMaxExtend:readInt("momMaxExtend",0),
+      // RSI trigger
+      rsiOn, rsi, rsiPeriod, rsiBuyBelow, rsiSellAbove
     };
   }
 
@@ -1517,6 +1693,8 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
       setText("btTrades","0/" + (sigs.length || 0));
       const hud=byId("equityHudRight"); if(hud) hud.style.display="none";
       STATE.backtestTotalReturn = null;
+      STATE.totalReturnEffective = false;
+      STATE.totalReturnEffectiveFactor = null;
       updateTotalReturnDisplay();
       return;
     }
@@ -1754,7 +1932,7 @@ function detectSignals(rows, windowDays, dipPct, horizon, opts){
     finally{ if(btn){ btn.disabled=false; btn.textContent="Fetch prices"; } }
   });
 
-  const ids=["relativeToIndex","window","dipPct","delay","horizon","highestSince","requireDip","onlyBreakout","shiftExit","cliffOn","cliffDays","cliffPct","volumeThreshold","smaPeriod","aboveSMA","belowSMA","autoY","smaCrossOn","smaCrossEnterPct","smaCrossExitPct","momentumExit","momDropPct","momLookback","momMaxExtend","sequentialTrades"];
+  const ids=["relativeToIndex","window","dipPct","delay","horizon","highestSince","requireDip","onlyBreakout","shiftExit","cliffOn","cliffDays","cliffPct","volumeThreshold","smaPeriod","aboveSMA","belowSMA","autoY","smaCrossOn","smaCrossEnterPct","smaCrossExitPct","momentumExit","momDropPct","momLookback","momMaxExtend","sequentialTrades","rsiOn","rsiPeriod","rsiBuyBelow","rsiSellAbove"];
   ids.forEach(id=>{
     const el=byId(id);
     if(!el) return;
